@@ -214,7 +214,8 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
       const workspaceKey = getWorkspaceKey(message);
       const replyMode = options.workspaceService.getReplyMode(workspaceKey);
-      const shouldHandle = shouldHandleMessage(message, botUserId) || replyMode === "auto";
+      const shouldHandle =
+        shouldHandleMessage(message, botUserId) || (replyMode === "auto" && !message.author.bot);
       if (!shouldHandle) {
         return;
       }

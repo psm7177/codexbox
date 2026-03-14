@@ -61,6 +61,10 @@ function createConfig(workspace: string): Config {
 }
 
 interface TestMessageOptions {
+  authorBot?: boolean;
+  authorId?: string;
+  authorTag?: string;
+  authorUsername?: string;
   attachments?: Array<{
     name: string | null;
     url: string;
@@ -102,10 +106,10 @@ function createMessage(options: TestMessageOptions = {}): Message {
     guild: { name: "Guild" },
     channel,
     author: {
-      id: "user-1",
-      bot: false,
-      username: "alice",
-      tag: "alice#0001",
+      id: options.authorId ?? "user-1",
+      bot: options.authorBot ?? false,
+      username: options.authorUsername ?? "alice",
+      tag: options.authorTag ?? "alice#0001",
     },
     mentions: {
       users: mentionsUsers,
@@ -835,4 +839,63 @@ test("message router auto reply mode handles plain channel messages without ment
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.inputs[0]?.type, "text");
   assert.match(calls[0]?.inputs[0]?.text ?? "", /plain message without mention$/);
+});
+
+test("message router ignores bot-authored messages even in auto reply mode", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceReplyMode("channel:guild-1:channel-1", "auto");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  let runTurnCalled = false;
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for bot-authored messages");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for bot-authored messages");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {
+      runTurnCalled = true;
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "plain message from another bot",
+      mentioned: false,
+      authorBot: true,
+      authorId: "other-bot",
+      authorUsername: "helperbot",
+      authorTag: "helperbot#0001",
+    }),
+  );
+
+  assert.equal(runTurnCalled, false);
 });
