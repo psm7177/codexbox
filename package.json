@@ -1,0 +1,24 @@
+{
+  "name": "codex-discord",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord bot that bridges Discord chat sessions to Codex app-server threads.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node scripts/run-bot.mjs",
+    "start:bot": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.6.1"
+  }
+}
