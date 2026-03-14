@@ -57,7 +57,7 @@ The local setup script then:
 - checks for `node`, `npm`, and `codex`
 - runs `npm install`
 - creates `.env` from `.env.example` if needed
-- prompts for `DISCORD_TOKEN`
+- prompts for `DISCORD_TOKEN` from the terminal, even when run through `curl | bash`
 - sets `CODEX_WORKSPACE=.`
 - runs the first build
 
@@ -72,6 +72,12 @@ If you already cloned the repo manually, you can still run:
 
 ```bash
 bash scripts/setup-linux.sh
+```
+
+If you want to avoid the prompt entirely, this also works:
+
+```bash
+DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
 ```
 
 TypeScript sources live under `src/` and compile to `dist/`.

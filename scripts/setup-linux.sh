@@ -16,7 +16,14 @@ prompt_value() {
   local prompt="$1"
   local value=""
   while [[ -z "$value" ]]; do
-    read -r -p "$prompt" value
+    if [[ -t 0 ]]; then
+      read -r -p "$prompt" value
+    elif [[ -r /dev/tty ]]; then
+      read -r -p "$prompt" value </dev/tty
+    else
+      echo "Unable to prompt for input. Set DISCORD_TOKEN in the environment before running this script." >&2
+      exit 1
+    fi
   done
   printf '%s' "$value"
 }
@@ -39,7 +46,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cp "$EXAMPLE_FILE" "$ENV_FILE"
 fi
 
-DISCORD_TOKEN_VALUE="$(prompt_value 'Discord bot token: ')"
+DISCORD_TOKEN_VALUE="${DISCORD_TOKEN:-}"
+if [[ -z "$DISCORD_TOKEN_VALUE" ]]; then
+  DISCORD_TOKEN_VALUE="$(prompt_value 'Discord bot token: ')"
+fi
 
 if grep -q '^DISCORD_TOKEN=' "$ENV_FILE"; then
   sed -i "s|^DISCORD_TOKEN=.*$|DISCORD_TOKEN=$DISCORD_TOKEN_VALUE|" "$ENV_FILE"
