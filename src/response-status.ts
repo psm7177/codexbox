@@ -1,6 +1,7 @@
 import type { ToolItem } from "./codex-app-server-client.js";
 
 const DISCORD_STATUS_LIMIT = 1900;
+const MAX_RECENT_TOOL_ITEMS = 10;
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -76,7 +77,7 @@ function renderTextSection(title: string, text: string): string[] {
 }
 
 export function formatToolActivity(tools: string[]): string {
-  const uniqueTools = uniqueStrings(tools);
+  const uniqueTools = uniqueStrings(tools).slice(-MAX_RECENT_TOOL_ITEMS);
   if (uniqueTools.length === 0) {
     return "";
   }
@@ -105,7 +106,7 @@ export function formatProgressMessage(options: {
 }): string {
   const lines = [options.headline ?? (options.isWriting ? "🔄 Drafting reply..." : "🔄 Thinking...")];
   lines.push(...renderListSection("Using now", options.activeTools));
-  lines.push(...renderListSection("Used tools", options.usedTools));
+  lines.push(...renderListSection("Used tools", options.usedTools.slice(-MAX_RECENT_TOOL_ITEMS)));
   lines.push(...renderTextSection("Preview", options.previewText));
   return fitDiscordMessage(lines.join("\n"));
 }

@@ -6,6 +6,7 @@ import { createCommandHandlers } from "./commands.js";
 import { loadConfig } from "./config.js";
 import { getConversationKey, getWorkspaceKey } from "./discord-context.js";
 import { ErrorTracker } from "./error-tracker.js";
+import { ActiveTurnRegistry } from "./lifecycle/active-turn-registry.js";
 import { RestartCoordinator } from "./lifecycle/restart-coordinator.js";
 import { SessionStore } from "./session-store.js";
 import { ConversationService } from "./state/conversation-service.js";
@@ -14,6 +15,7 @@ import { createReadyHandler } from "./startup/ready-handler.js";
 
 const config = loadConfig();
 const restartCoordinator = new RestartCoordinator();
+const activeTurnRegistry = new ActiveTurnRegistry();
 const errorTracker = new ErrorTracker();
 
 if (!config.discordToken) {
@@ -43,6 +45,7 @@ const commandHandlers = createCommandHandlers({
   config,
   conversationService,
   restartCoordinator,
+  activeTurnRegistry,
   workspaceService,
   codexClient,
   errorTracker,
@@ -61,6 +64,7 @@ const handleMessageCreate = createMessageCreateHandler({
   config,
   conversationService,
   restartCoordinator,
+  activeTurnRegistry,
   workspaceService,
   codexClient,
   commandHandlers,

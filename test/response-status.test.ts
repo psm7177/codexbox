@@ -58,5 +58,24 @@ test("formatCompletionMessage is capped to Discord-safe length", () => {
   const completion = formatCompletionMessage(Array.from({ length: 300 }, (_, index) => `exec: tool-${index}`));
 
   assert.ok(completion.length <= 1900);
-  assert.match(completion, /\.\.\. \(truncated\)$/);
+  assert.match(completion, /tool-299/);
+});
+
+test("progress and completion messages keep only the most recent 10 tool entries", () => {
+  const tools = Array.from({ length: 12 }, (_, index) => `exec: tool-${index}`);
+
+  const progress = formatProgressMessage({
+    isWriting: true,
+    activeTools: [],
+    usedTools: tools,
+    previewText: "preview",
+  });
+  const completion = formatCompletionMessage(tools);
+
+  assert.doesNotMatch(progress, /tool-0\b/);
+  assert.doesNotMatch(progress, /tool-1\b/);
+  assert.match(progress, /tool-11\b/);
+  assert.doesNotMatch(completion, /tool-0\b/);
+  assert.doesNotMatch(completion, /tool-1\b/);
+  assert.match(completion, /tool-11\b/);
 });

@@ -4,6 +4,7 @@ import type { Config } from "../config.js";
 import { editMessageIfChanged, sendImagesToChannel, sendToChannel } from "../discord/message-sender.js";
 import { resolveImageArtifacts } from "../discord-images.js";
 import { splitDiscordMessage } from "../discord-context.js";
+import { ActiveTurnRegistry, type ActiveTurnRegistry as ActiveTurnRegistryType } from "../lifecycle/active-turn-registry.js";
 import { formatCompletionMessage, formatProgressMessage, summarizeToolItem } from "../response-status.js";
 
 function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
@@ -21,13 +22,17 @@ function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
 
 export async function runCodexTurn(options: {
   message: Message;
+  conversationKey?: string;
   threadId: string;
   inputs: CodexUserInput[];
   cwd: string;
   codexWorkspace: string;
   sandboxPolicy: Config["turnDefaults"]["sandboxPolicy"];
-  codexClient: Pick<CodexAppServerClient, "startTurn">;
+  codexClient: Pick<CodexAppServerClient, "startTurn"> & Partial<Pick<CodexAppServerClient, "interruptTurn">>;
+  activeTurnRegistry?: ActiveTurnRegistryType;
 }): Promise<void> {
+  const conversationKey = options.conversationKey ?? `${options.threadId}:default`;
+  const activeTurnRegistry = options.activeTurnRegistry ?? new ActiveTurnRegistry();
   const placeholder = await options.message.reply(
     formatProgressMessage({
       isWriting: false,
@@ -41,6 +46,7 @@ export async function runCodexTurn(options: {
   const toolEvents: string[] = [];
   let previewText = "";
   let isWriting = false;
+  let stopRequested = false;
   const activeToolCounts = new Map<string, number>();
 
   const updatePlaceholder = async (force = false): Promise<void> => {
@@ -63,12 +69,32 @@ export async function runCodexTurn(options: {
   };
 
   try {
+    activeTurnRegistry.begin(conversationKey, options.threadId);
     const result = await options.codexClient.startTurn({
       threadId: options.threadId,
       inputs: options.inputs,
       cwd: options.cwd,
       sandboxPolicy: options.sandboxPolicy,
+      onStarted: async (turnId) => {
+        const state = activeTurnRegistry.attachTurnId(conversationKey, turnId);
+        if (!state?.stopRequested || !options.codexClient.interruptTurn) {
+          return;
+        }
+
+        stopRequested = true;
+        await editMessageIfChanged(placeholder, "🛑 Stopping reply...", lastRendered);
+        await options.codexClient.interruptTurn({
+          threadId: state.threadId,
+          turnId,
+        });
+      },
       onDelta: async (fullText) => {
+        if (activeTurnRegistry.get(conversationKey)?.stopRequested) {
+          stopRequested = true;
+          await editMessageIfChanged(placeholder, "🛑 Stopping reply...", lastRendered);
+          return;
+        }
+
         previewText = fullText.trim();
         if (!isWriting && fullText.trim()) {
           isWriting = true;
@@ -79,6 +105,12 @@ export async function runCodexTurn(options: {
         await updatePlaceholder();
       },
       onToolEvent: (eventName: string, item: ToolItem) => {
+        if (activeTurnRegistry.get(conversationKey)?.stopRequested) {
+          stopRequested = true;
+          void editMessageIfChanged(placeholder, "🛑 Stopping reply...", lastRendered);
+          return;
+        }
+
         const summary = summarizeToolItem(item);
         if (!summary) {
           return;
@@ -99,6 +131,11 @@ export async function runCodexTurn(options: {
         void updatePlaceholder(true);
       },
     });
+
+    if (stopRequested || activeTurnRegistry.get(conversationKey)?.stopRequested || result.turn.status === "interrupted") {
+      await editMessageIfChanged(placeholder, "Reply stopped.", lastRendered);
+      return;
+    }
 
     await editMessageIfChanged(
       placeholder,
@@ -132,5 +169,7 @@ export async function runCodexTurn(options: {
   } catch (error) {
     await editMessageIfChanged(placeholder, "Reply failed.", lastRendered);
     throw error;
+  } finally {
+    activeTurnRegistry.clear(conversationKey);
   }
 }

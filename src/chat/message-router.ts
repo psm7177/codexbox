@@ -15,6 +15,7 @@ import {
 } from "../discord-context.js";
 import type { ErrorTracker } from "../error-tracker.js";
 import { resolveLocalReferences } from "../local-references.js";
+import { ActiveTurnRegistry, type ActiveTurnRegistry as ActiveTurnRegistryType } from "../lifecycle/active-turn-registry.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
@@ -26,8 +27,10 @@ interface MessageRouterOptions {
   config: Config;
   conversationService: ConversationService;
   restartCoordinator: RestartCoordinator;
+  activeTurnRegistry?: ActiveTurnRegistryType;
   workspaceService: WorkspaceService;
-  codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn">;
+  codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn"> &
+    Partial<Pick<CodexAppServerClient, "interruptTurn">>;
   commandHandlers: Record<string, CommandHandler>;
   errorTracker: ErrorTracker;
   getBotUserId: () => string | undefined;
@@ -82,6 +85,7 @@ function createConversationSerializer(): <T>(key: string, task: () => Promise<T>
 export function createMessageCreateHandler(options: MessageRouterOptions): (message: Message) => Promise<void> {
   const serializeConversation = createConversationSerializer();
   const runTurn = options.runTurn ?? runCodexTurn;
+  const activeTurnRegistry = options.activeTurnRegistry ?? new ActiveTurnRegistry();
   const log = options.log ?? console.log;
   const errorLog = options.errorLog ?? console.error;
   const restartReply = "Restart requested. Not accepting new requests until shutdown completes.";
@@ -186,12 +190,14 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
         await runTurn({
           message,
+          conversationKey,
           threadId,
           inputs,
           cwd,
           codexWorkspace: options.config.codexWorkspace,
           sandboxPolicy,
           codexClient: options.codexClient,
+          activeTurnRegistry,
         });
       } finally {
         options.restartCoordinator.endTurn();

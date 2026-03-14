@@ -10,6 +10,7 @@ import { createResetCommand } from "./commands/reset.js";
 import { createRestartCommand } from "./commands/restart.js";
 import { createSessionsCommand } from "./commands/sessions.js";
 import { createStatusCommand } from "./commands/status.js";
+import { createStopCommand } from "./commands/stop.js";
 import { createWorkspaceCommand } from "./commands/workspace.js";
 import type { CommandContext, CommandHandler, ParsedCommand } from "./commands/types.js";
 
@@ -30,6 +31,7 @@ export function createCommandHandlers(context: CommandContext): Record<string, C
   return {
     help: createHelpCommand(),
     status: createStatusCommand(context),
+    stop: createStopCommand(context),
     sessions: createSessionsCommand(context),
     bind: createBindCommand(context),
     workspace: createWorkspaceCommand(context),

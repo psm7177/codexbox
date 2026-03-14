@@ -7,6 +7,7 @@ export function createHelpCommand(): CommandHandler {
         "Available commands:",
         "`!codex help`",
         "`!codex status`",
+        "`!codex stop`",
         "`!codex sessions` (admin)",
         "`!codex bind <thread-id>` (admin)",
         "`!codex workspace` (admin)",

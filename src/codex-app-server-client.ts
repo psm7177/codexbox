@@ -19,6 +19,7 @@ interface PendingTurn {
   onDelta?: (fullText: string, delta: string) => Promise<void> | void;
   onPlan?: (planEvent: PlanEvent) => Promise<void> | void;
   onToolEvent?: (eventName: string, item: ToolItem) => void;
+  onStarted?: (turnId: string) => Promise<void> | void;
   text: string;
 }
 
@@ -189,6 +190,7 @@ export class CodexAppServerClient extends EventEmitter {
     onDelta,
     onPlan,
     onToolEvent,
+    onStarted,
   }: {
     threadId: string;
     inputs: CodexUserInput[];
@@ -197,6 +199,7 @@ export class CodexAppServerClient extends EventEmitter {
     onDelta?: PendingTurn["onDelta"];
     onPlan?: PendingTurn["onPlan"];
     onToolEvent?: PendingTurn["onToolEvent"];
+    onStarted?: PendingTurn["onStarted"];
   }): Promise<TurnResult> {
     await this.ensureStarted();
     const resolvedCwd = cwd ?? this.config.turnDefaults.cwd;
@@ -221,10 +224,17 @@ export class CodexAppServerClient extends EventEmitter {
       onDelta,
       onPlan,
       onToolEvent,
+      onStarted,
       deferred,
       text: "",
     });
+    await onStarted?.(turnId);
     return deferred.promise;
+  }
+
+  async interruptTurn(params: { threadId: string; turnId: string }): Promise<void> {
+    await this.ensureStarted();
+    await this.request("turn/interrupt", params);
   }
 
   async request(method: string, params: unknown): Promise<unknown> {
