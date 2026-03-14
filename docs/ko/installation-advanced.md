@@ -55,8 +55,8 @@ SYSTEMD_ENABLE_LINGER=0 SYSTEMD_SERVICE_SCOPE=user INSTALL_SYSTEMD_SERVICE=1 bas
 ## 서비스 확인 명령
 
 ```bash
-sudo systemctl status codex-discord --no-pager
-sudo journalctl -u codex-discord -f
-systemctl --user status codex-discord --no-pager
-journalctl --user -u codex-discord -f
+sudo systemctl status codexbox --no-pager
+sudo journalctl -u codexbox -f
+systemctl --user status codexbox --no-pager
+journalctl --user -u codexbox -f
 ```

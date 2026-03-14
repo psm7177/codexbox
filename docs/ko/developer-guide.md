@@ -17,7 +17,7 @@
 
 ## MCP 연동
 
-- setup 시 로컬 MCP 서버 `codex-discord-tools`를 등록합니다
+- setup 시 로컬 MCP 서버 `codexbox-tools`를 등록합니다
 - 이 서버는 `send_discord_image(channel_id, image, caption?)` tool을 제공합니다
 - 봇은 매 turn마다 현재 Discord `channel_id`를 Codex 입력에 주입합니다
 - MCP 서버는 저장소의 `.env`를 직접 읽기 때문에 `DISCORD_TOKEN`을 별도로 `codex mcp add --env ...` 로 넘길 필요가 없습니다
@@ -58,5 +58,5 @@ CODEX_APP_SERVER_ARGS="app-server --listen stdio://"
 npm run build
 npm test
 npm start
-codex mcp get codex-discord-tools
+codex mcp get codexbox-tools
 ```

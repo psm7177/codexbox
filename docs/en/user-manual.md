@@ -2,7 +2,7 @@
 
 ## What It Does
 
-`codex-discord` is a bridge between Discord and Codex. Its purpose is to let a person use Codex from a Discord conversation instead of a local terminal window.
+`codexbox` is a bridge between Discord and Codex. Its purpose is to let a person use Codex from a Discord conversation instead of a local terminal window.
 
 This project is meant for teams or individuals who want to:
 

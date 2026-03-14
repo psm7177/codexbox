@@ -1,5 +1,5 @@
 install_codex_mcp_server() {
-  local server_name="${CODEX_DISCORD_MCP_SERVER_NAME:-codex-discord-tools}"
+  local server_name="${CODEXBOX_MCP_SERVER_NAME:-${CODEX_DISCORD_MCP_SERVER_NAME:-codexbox-tools}}"
   local server_script="$ROOT_DIR/scripts/mcp-discord-server.mjs"
 
   require_command codex

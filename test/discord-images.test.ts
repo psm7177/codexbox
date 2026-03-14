@@ -6,7 +6,7 @@ import test from "node:test";
 import { resolveImageArtifacts } from "../src/discord-images.js";
 
 test("resolveImageArtifacts resolves local imageView artifacts within allowed roots", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-images-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-images-"));
   const imagePath = path.join(tempDir, "chart.png");
   await fs.writeFile(imagePath, "png");
 
@@ -57,7 +57,7 @@ test("resolveImageArtifacts preserves remote image URLs", async () => {
 });
 
 test("resolveImageArtifacts rejects unsupported extensions and disallowed roots", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-images-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-images-"));
   const textPath = path.join(tempDir, "note.txt");
   await fs.writeFile(textPath, "hello");
 
@@ -86,7 +86,7 @@ test("resolveImageArtifacts rejects unsupported extensions and disallowed roots"
 });
 
 test("resolveImageArtifacts deduplicates repeated artifacts", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-images-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-images-"));
   const imagePath = path.join(tempDir, "chart.png");
   await fs.writeFile(imagePath, "png");
 

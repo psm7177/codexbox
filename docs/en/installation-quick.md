@@ -21,5 +21,5 @@ curl -fsSL https://raw.githubusercontent.com/psm7177/codexbox/master/scripts/ins
 - creates `.env` if needed
 - prompts for `DISCORD_TOKEN`
 - builds the project
-- registers the local MCP server `codex-discord-tools`
-- installs and starts the `codex-discord` systemd service
+- registers the local MCP server `codexbox-tools`
+- installs and starts the `codexbox` systemd service

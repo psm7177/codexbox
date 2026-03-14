@@ -1,4 +1,4 @@
-# codex-discord
+# codexbox
 
 Discord bot that maps Discord conversations to Codex app-server threads.
 

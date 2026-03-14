@@ -6,7 +6,7 @@ import test from "node:test";
 import { SessionStore } from "../src/session-store.js";
 
 test("session store persists sessions", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
   const storePath = path.join(tempDir, "sessions.json");
   const store = new SessionStore(storePath);
 
@@ -20,7 +20,7 @@ test("session store persists sessions", async () => {
 });
 
 test("session store persists workspace mappings", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
   const storePath = path.join(tempDir, "sessions.json");
   const store = new SessionStore(storePath);
 
@@ -34,7 +34,7 @@ test("session store persists workspace mappings", async () => {
 });
 
 test("session store persists workspace network access", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
   const storePath = path.join(tempDir, "sessions.json");
   const store = new SessionStore(storePath);
 
@@ -48,7 +48,7 @@ test("session store persists workspace network access", async () => {
 });
 
 test("session store persists workspace sandbox mode", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
   const storePath = path.join(tempDir, "sessions.json");
   const store = new SessionStore(storePath);
 

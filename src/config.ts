@@ -131,8 +131,8 @@ export function loadConfig(): Config {
       args: appServerArgs,
     },
     clientInfo: {
-      name: "codex_discord",
-      title: "Codex Discord Bridge",
+      name: "codexbox",
+      title: "Codexbox",
       version: "0.1.0",
     },
     threadDefaults: {
@@ -141,7 +141,7 @@ export function loadConfig(): Config {
       modelProvider: process.env.CODEX_MODEL_PROVIDER || undefined,
       personality: process.env.CODEX_PERSONALITY || "pragmatic",
       approvalPolicy: process.env.CODEX_APPROVAL_POLICY || "never",
-      serviceName: process.env.CODEX_SERVICE_NAME || "discord_bot",
+      serviceName: process.env.CODEX_SERVICE_NAME || "codexbox",
     },
     turnDefaults: {
       cwd: codexWorkspace,

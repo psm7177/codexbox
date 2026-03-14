@@ -21,5 +21,5 @@ curl -fsSL https://raw.githubusercontent.com/psm7177/codexbox/master/scripts/ins
 - `.env` 생성
 - `DISCORD_TOKEN` 입력
 - 첫 build 실행
-- `codex-discord-tools` MCP 서버 등록
-- `codex-discord` systemd 서비스 설치 및 시작
+- `codexbox-tools` MCP 서버 등록
+- `codexbox` systemd 서비스 설치 및 시작

@@ -11,7 +11,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, "..");
 dotenv.config({ path: path.join(ROOT_DIR, ".env") });
 
-const SERVER_NAME = "codex-discord-tools";
+const SERVER_NAME = "codexbox-tools";
 const SERVER_VERSION = "0.1.0";
 const DISCORD_CONTENT_LIMIT = 2000;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -164,7 +164,7 @@ async function resolveDataUrl(dataUrl) {
     throw new Error(`unsupported image type: ${mimeType}`);
   }
 
-  const filePath = path.join(os.tmpdir(), `codex-discord-mcp-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+  const filePath = path.join(os.tmpdir(), `codexbox-mcp-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
   await fs.writeFile(filePath, Buffer.from(encoded, "base64"));
   return {
     kind: "attachment",

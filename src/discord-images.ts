@@ -107,7 +107,7 @@ async function resolveDataUrl(dataUrl: string): Promise<{ image?: LocalImageAtta
     return { error: `unsupported image type: ${mimeType}` };
   }
 
-  const filePath = path.join(os.tmpdir(), `codex-discord-image-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+  const filePath = path.join(os.tmpdir(), `codexbox-image-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
   await fs.writeFile(filePath, Buffer.from(encoded, "base64"));
   return {
     image: {

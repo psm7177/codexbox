@@ -157,7 +157,7 @@ install_system_service() {
 
   cat >"$temp_unit" <<EOF
 [Unit]
-Description=Codex Discord Bridge
+Description=Codexbox
 After=network-online.target
 Wants=network-online.target
 
@@ -243,7 +243,7 @@ install_user_service() {
 
   cat >"$temp_unit" <<EOF
 [Unit]
-Description=Codex Discord Bridge
+Description=Codexbox
 After=network-online.target
 Wants=network-online.target
 

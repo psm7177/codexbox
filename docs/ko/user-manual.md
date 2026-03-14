@@ -2,7 +2,7 @@
 
 ## 무엇을 하는 봇인가
 
-`codex-discord`는 Discord와 Codex를 연결하는 브리지입니다. 로컬 터미널 대신 Discord 대화 안에서 Codex를 사용할 수 있게 만드는 것이 이 프로젝트의 목적입니다.
+`codexbox`는 Discord와 Codex를 연결하는 브리지입니다. 로컬 터미널 대신 Discord 대화 안에서 Codex를 사용할 수 있게 만드는 것이 이 프로젝트의 목적입니다.
 
 이 프로젝트는 다음과 같은 목적에 맞습니다.
 

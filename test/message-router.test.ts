@@ -28,15 +28,15 @@ function createConfig(workspace: string): Config {
       args: ["app-server", "--listen", "stdio://"],
     },
     clientInfo: {
-      name: "codex_discord",
-      title: "Codex Discord Bridge",
+      name: "codexbox",
+      title: "Codexbox",
       version: "0.1.0",
     },
     threadDefaults: {
       cwd: workspace,
       personality: "pragmatic",
       approvalPolicy: "never",
-      serviceName: "discord_bot",
+      serviceName: "codexbox",
     },
     turnDefaults: {
       cwd: workspace,

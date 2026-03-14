@@ -85,7 +85,7 @@
 
 ## MCP Integration
 
-- Setup registers a local MCP server named `codex-discord-tools`
+- Setup registers a local MCP server named `codexbox-tools`
 - The server exposes `send_discord_image(channel_id, image, caption?)`
 - The bot injects the current Discord `channel_id` into each Codex turn
 - The MCP server reads the repository `.env` on startup, so `DISCORD_TOKEN` does not need to be passed via `codex mcp add --env ...`
@@ -126,5 +126,5 @@ CODEX_APP_SERVER_ARGS="app-server --listen stdio://"
 npm run build
 npm test
 npm start
-codex mcp get codex-discord-tools
+codex mcp get codexbox-tools
 ```
