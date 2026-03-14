@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatProgressMessage, formatToolActivity, summarizeToolItem } from "../src/response-status.js";
+import {
+  formatCompletionMessage,
+  formatProgressMessage,
+  formatToolActivity,
+  summarizeToolItem,
+} from "../src/response-status.js";
 
 test("summarizeToolItem formats command executions compactly", () => {
   const summary = summarizeToolItem({
@@ -11,13 +16,18 @@ test("summarizeToolItem formats command executions compactly", () => {
   assert.equal(summary, "exec: npm run build -- --watch");
 });
 
-test("formatProgressMessage shows spinner only while working and lists active tools", () => {
+test("formatProgressMessage shows active, used, and reasoning sections", () => {
   const progress = formatProgressMessage({
     isWriting: false,
     activeTools: ["exec: npm test", "edit: src/index.ts"],
+    usedTools: ["exec: npm test", "edit: src/index.ts"],
+    reasoningEntries: ["in_progress: inspect code", "pending: write tests"],
   });
 
-  assert.equal(progress, "🔄 Thinking...\n\nCurrent tools:\n- exec: npm test\n- edit: src/index.ts");
+  assert.equal(
+    progress,
+    "🔄 Thinking...\n\nUsing now:\n- exec: npm test\n- edit: src/index.ts\n\nUsed tools:\n- exec: npm test\n- edit: src/index.ts\n\nReasoning summary:\n- in_progress: inspect code\n- pending: write tests",
+  );
 });
 
 test("formatToolActivity deduplicates tool summaries", () => {
@@ -28,4 +38,13 @@ test("formatToolActivity deduplicates tool summaries", () => {
   ]);
 
   assert.equal(activity, "Tools used:\n- exec: npm test\n- edit: src/index.ts");
+});
+
+test("formatCompletionMessage includes full tool activity", () => {
+  const completion = formatCompletionMessage([
+    "exec: npm test",
+    "edit: src/index.ts",
+  ]);
+
+  assert.equal(completion, "Reply complete.\n\nTools used:\n- exec: npm test\n- edit: src/index.ts");
 });

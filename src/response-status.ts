@@ -1,30 +1,13 @@
 import type { ToolItem } from "./codex-app-server-client.js";
 
-const MAX_VISIBLE_TOOLS = 5;
-const MAX_SUMMARY_LENGTH = 80;
+const DISCORD_STATUS_LIMIT = 1900;
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) {
-    return text;
-  }
-  return `${text.slice(0, maxLength - 1).trimEnd()}...`;
-}
-
 function formatTypeLabel(type: string): string {
   return normalizeWhitespace(type.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_/:.-]+/g, " "));
-}
-
-function formatVisibleTools(tools: string[]): string[] {
-  const visible = tools.slice(0, MAX_VISIBLE_TOOLS);
-  const remaining = tools.length - visible.length;
-  if (remaining > 0) {
-    return [...visible, `+${remaining} more`];
-  }
-  return visible;
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -49,7 +32,7 @@ export function summarizeToolItem(item: ToolItem): string | null {
 
   if (item.type === "commandExecution") {
     const command = normalizeWhitespace(item.command ?? "");
-    return command ? `exec: ${truncate(command, MAX_SUMMARY_LENGTH)}` : "exec";
+    return command ? `exec: ${command}` : "exec";
   }
 
   if (item.type === "fileChange") {
@@ -58,30 +41,23 @@ export function summarizeToolItem(item: ToolItem): string | null {
       return "edit files";
     }
 
-    const visiblePaths = paths.slice(0, 2).join(", ");
-    const extra = paths.length - Math.min(paths.length, 2);
-    const suffix = extra > 0 ? ` (+${extra})` : "";
-    return `edit: ${truncate(`${visiblePaths}${suffix}`, MAX_SUMMARY_LENGTH)}`;
+    return `edit: ${paths.join(", ")}`;
   }
 
   return `tool: ${formatTypeLabel(item.type)}`;
 }
 
-export function formatProgressMessage(options: {
-  isWriting: boolean;
-  activeTools: string[];
-}): string {
-  const lines = [options.isWriting ? "🔄 Drafting reply..." : "🔄 Thinking..."];
-  const activeTools = formatVisibleTools(options.activeTools);
-
-  if (activeTools.length > 0) {
-    lines.push("", "Current tools:");
-    for (const tool of activeTools) {
-      lines.push(`- ${tool}`);
-    }
+function renderListSection(title: string, items: string[]): string[] {
+  const lines = ["", `${title}:`];
+  if (items.length === 0) {
+    lines.push("- none");
+    return lines;
   }
 
-  return lines.join("\n");
+  for (const item of items) {
+    lines.push(`- ${item}`);
+  }
+  return lines;
 }
 
 export function formatToolActivity(tools: string[]): string {
@@ -91,8 +67,35 @@ export function formatToolActivity(tools: string[]): string {
   }
 
   const lines = ["Tools used:"];
-  for (const tool of formatVisibleTools(uniqueTools)) {
+  for (const tool of uniqueTools) {
     lines.push(`- ${tool}`);
   }
   return lines.join("\n");
+}
+
+function fitDiscordMessage(text: string): string {
+  if (text.length <= DISCORD_STATUS_LIMIT) {
+    return text;
+  }
+
+  return `${text.slice(0, DISCORD_STATUS_LIMIT - 16).trimEnd()}\n... (truncated)`;
+}
+
+export function formatProgressMessage(options: {
+  headline?: string;
+  isWriting: boolean;
+  activeTools: string[];
+  usedTools: string[];
+  reasoningEntries: string[];
+}): string {
+  const lines = [options.headline ?? (options.isWriting ? "🔄 Drafting reply..." : "🔄 Thinking...")];
+  lines.push(...renderListSection("Using now", options.activeTools));
+  lines.push(...renderListSection("Used tools", options.usedTools));
+  lines.push(...renderListSection("Reasoning summary", options.reasoningEntries));
+  return fitDiscordMessage(lines.join("\n"));
+}
+
+export function formatCompletionMessage(tools: string[]): string {
+  const activity = formatToolActivity(tools);
+  return activity ? `Reply complete.\n\n${activity}` : "Reply complete.";
 }

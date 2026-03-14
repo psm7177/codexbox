@@ -11,7 +11,7 @@ import {
   splitDiscordMessage,
   stripBotMention,
 } from "./discord-context.js";
-import { formatProgressMessage, formatToolActivity, summarizeToolItem } from "./response-status.js";
+import { formatProgressMessage, summarizeToolItem } from "./response-status.js";
 import { SessionStore } from "./session-store.js";
 
 const config = loadConfig();
@@ -125,6 +125,19 @@ function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
   return activeTools;
 }
 
+function recordReasoningEntry(entries: string[], entry: string): void {
+  const normalized = entry.trim();
+  if (!normalized) {
+    return;
+  }
+
+  if (entries[entries.length - 1] === normalized) {
+    return;
+  }
+
+  entries.push(normalized);
+}
+
 async function handleChatMessage(message: Message): Promise<void> {
   const conversationKey = getConversationKey(message);
   const workspaceKey = getWorkspaceKey(message);
@@ -173,10 +186,18 @@ async function handleChatMessage(message: Message): Promise<void> {
       await sessionStore.set(conversationKey, session);
     }
 
-    const placeholder = await message.reply(formatProgressMessage({ isWriting: false, activeTools: [] }));
+    const placeholder = await message.reply(
+      formatProgressMessage({
+        isWriting: false,
+        activeTools: [],
+        usedTools: [],
+        reasoningEntries: [],
+      }),
+    );
     const lastRendered = { value: "" };
     let lastUpdateAt = 0;
     const toolEvents: string[] = [];
+    const reasoningEntries: string[] = [];
     let isWriting = false;
     const activeToolCounts = new Map<string, number>();
 
@@ -192,6 +213,8 @@ async function handleChatMessage(message: Message): Promise<void> {
         formatProgressMessage({
           isWriting,
           activeTools: formatActiveToolList(activeToolCounts),
+          usedTools: toolEvents,
+          reasoningEntries,
         }),
         lastRendered,
       );
@@ -206,6 +229,7 @@ async function handleChatMessage(message: Message): Promise<void> {
         onDelta: async (fullText) => {
           if (!isWriting && fullText.trim()) {
             isWriting = true;
+            recordReasoningEntry(reasoningEntries, "Started drafting the final response.");
             await updatePlaceholder(true);
             return;
           }
@@ -215,7 +239,10 @@ async function handleChatMessage(message: Message): Promise<void> {
         onPlan: async (planEvent) => {
           const steps = (planEvent.plan ?? []).map((step) => `${step.status}: ${step.step}`).join("\n");
           if (steps) {
-            await sendToChannel(message, `Plan update:\n\`\`\`\n${steps}\n\`\`\``);
+            for (const step of steps.split("\n")) {
+              recordReasoningEntry(reasoningEntries, step);
+            }
+            await updatePlaceholder(true);
           }
         },
         onToolEvent: (eventName, item) => {
@@ -227,6 +254,7 @@ async function handleChatMessage(message: Message): Promise<void> {
           if (eventName === "item/started") {
             toolEvents.push(summary);
             activeToolCounts.set(summary, (activeToolCounts.get(summary) ?? 0) + 1);
+            recordReasoningEntry(reasoningEntries, `Started tool: ${summary}`);
           } else if (eventName === "item/completed") {
             const count = activeToolCounts.get(summary) ?? 0;
             if (count <= 1) {
@@ -234,17 +262,26 @@ async function handleChatMessage(message: Message): Promise<void> {
             } else {
               activeToolCounts.set(summary, count - 1);
             }
+            recordReasoningEntry(reasoningEntries, `Completed tool: ${summary}`);
           }
 
           void updatePlaceholder(true);
         },
       });
 
-      await editMessageIfChanged(placeholder, "Reply complete.", lastRendered);
+      await editMessageIfChanged(
+        placeholder,
+        formatProgressMessage({
+          headline: "Reply complete.",
+          isWriting: false,
+          activeTools: formatActiveToolList(activeToolCounts),
+          usedTools: toolEvents,
+          reasoningEntries,
+        }),
+        lastRendered,
+      );
 
-      const activity = formatToolActivity(toolEvents);
-      const baseText = result.text || "No assistant text returned.";
-      const finalText = activity ? `${baseText}\n\n${activity}` : baseText;
+      const finalText = result.text || "No assistant text returned.";
       const chunks = splitDiscordMessage(finalText);
 
       if (chunks.length === 0) {
