@@ -11,6 +11,7 @@ import {
   splitDiscordMessage,
   stripBotMention,
 } from "./discord-context.js";
+import { formatProgressMessage, formatToolActivity, summarizeToolItem } from "./response-status.js";
 import { SessionStore } from "./session-store.js";
 
 const config = loadConfig();
@@ -81,19 +82,6 @@ function serializeConversation<T>(key: string, task: () => Promise<T>): Promise<
   return current;
 }
 
-function summarizeItem(item: ToolItem): string | null {
-  if (!item?.type) {
-    return null;
-  }
-  if (item.type === "commandExecution") {
-    return `command: ${item.command}`;
-  }
-  if (item.type === "fileChange") {
-    return `file change: ${(item.changes ?? []).map((change) => change.path).join(", ")}`;
-  }
-  return item.type;
-}
-
 function describeMessageSource(message: Message): string {
   if (!message.inGuild()) {
     return `dm:${message.author.username}`;
@@ -109,6 +97,32 @@ async function sendToChannel(message: Message, content: string): Promise<void> {
     throw new Error("Message channel is not sendable");
   }
   await message.channel.send(content);
+}
+
+async function editMessageIfChanged(
+  message: { edit: (content: string) => Promise<unknown> },
+  content: string,
+  lastContent: { value: string },
+): Promise<void> {
+  if (content === lastContent.value) {
+    return;
+  }
+
+  await message.edit(content);
+  lastContent.value = content;
+}
+
+function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
+  const activeTools: string[] = [];
+
+  for (const [tool, count] of activeToolCounts.entries()) {
+    if (count <= 0) {
+      continue;
+    }
+    activeTools.push(count > 1 ? `${tool} (${count})` : tool);
+  }
+
+  return activeTools;
 }
 
 async function handleChatMessage(message: Message): Promise<void> {
@@ -159,56 +173,91 @@ async function handleChatMessage(message: Message): Promise<void> {
       await sessionStore.set(conversationKey, session);
     }
 
-    const placeholder = await message.reply("Thinking...");
-    let lastRendered = "";
+    const placeholder = await message.reply(formatProgressMessage({ isWriting: false, activeTools: [] }));
+    const lastRendered = { value: "" };
     let lastUpdateAt = 0;
     const toolEvents: string[] = [];
+    let isWriting = false;
+    const activeToolCounts = new Map<string, number>();
 
-    const result = await codexClient.startTurn({
-      threadId,
-      text: rawText,
-      cwd,
-      sandboxPolicy,
-      onDelta: async (fullText) => {
-        const now = Date.now();
-        if (now - lastUpdateAt < 1200) {
-          return;
-        }
-        lastUpdateAt = now;
-        const preview = splitDiscordMessage(fullText)[0] ?? "Thinking...";
-        if (preview && preview !== lastRendered) {
-          lastRendered = preview;
-          await placeholder.edit(preview);
-        }
-      },
-      onPlan: async (planEvent) => {
-        const steps = (planEvent.plan ?? []).map((step) => `${step.status}: ${step.step}`).join("\n");
-        if (steps) {
-          await sendToChannel(message, `Plan update:\n\`\`\`\n${steps}\n\`\`\``);
-        }
-      },
-      onToolEvent: (eventName, item) => {
-        if (eventName === "item/started") {
-          const summary = summarizeItem(item);
-          if (summary) {
-            toolEvents.push(summary);
+    const updatePlaceholder = async (force = false): Promise<void> => {
+      const now = Date.now();
+      if (!force && now - lastUpdateAt < 1200) {
+        return;
+      }
+
+      lastUpdateAt = now;
+      await editMessageIfChanged(
+        placeholder,
+        formatProgressMessage({
+          isWriting,
+          activeTools: formatActiveToolList(activeToolCounts),
+        }),
+        lastRendered,
+      );
+    };
+
+    try {
+      const result = await codexClient.startTurn({
+        threadId,
+        text: rawText,
+        cwd,
+        sandboxPolicy,
+        onDelta: async (fullText) => {
+          if (!isWriting && fullText.trim()) {
+            isWriting = true;
+            await updatePlaceholder(true);
+            return;
           }
-        }
-      },
-    });
 
-    const activity = toolEvents.length > 0 ? `\n\nActivity:\n- ${toolEvents.join("\n- ")}` : "";
-    const finalText = result.text || `No assistant text returned.${activity}`;
-    const chunks = splitDiscordMessage(finalText);
+          await updatePlaceholder();
+        },
+        onPlan: async (planEvent) => {
+          const steps = (planEvent.plan ?? []).map((step) => `${step.status}: ${step.step}`).join("\n");
+          if (steps) {
+            await sendToChannel(message, `Plan update:\n\`\`\`\n${steps}\n\`\`\``);
+          }
+        },
+        onToolEvent: (eventName, item) => {
+          const summary = summarizeToolItem(item);
+          if (!summary) {
+            return;
+          }
 
-    if (chunks.length === 0) {
-      await placeholder.edit("No assistant text returned.");
-      return;
-    }
+          if (eventName === "item/started") {
+            toolEvents.push(summary);
+            activeToolCounts.set(summary, (activeToolCounts.get(summary) ?? 0) + 1);
+          } else if (eventName === "item/completed") {
+            const count = activeToolCounts.get(summary) ?? 0;
+            if (count <= 1) {
+              activeToolCounts.delete(summary);
+            } else {
+              activeToolCounts.set(summary, count - 1);
+            }
+          }
 
-    await placeholder.edit(chunks[0] ?? "No assistant text returned.");
-    for (const chunk of chunks.slice(1)) {
-      await sendToChannel(message, chunk);
+          void updatePlaceholder(true);
+        },
+      });
+
+      await editMessageIfChanged(placeholder, "Reply complete.", lastRendered);
+
+      const activity = formatToolActivity(toolEvents);
+      const baseText = result.text || "No assistant text returned.";
+      const finalText = activity ? `${baseText}\n\n${activity}` : baseText;
+      const chunks = splitDiscordMessage(finalText);
+
+      if (chunks.length === 0) {
+        await sendToChannel(message, "No assistant text returned.");
+        return;
+      }
+
+      for (const chunk of chunks) {
+        await sendToChannel(message, chunk);
+      }
+    } catch (error) {
+      await editMessageIfChanged(placeholder, "Reply failed.", lastRendered);
+      throw error;
     }
   });
 }
