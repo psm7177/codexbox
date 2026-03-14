@@ -18,6 +18,10 @@ Discord bot that treats Discord channels as Codex workspaces and Discord convers
 - `!codex cwd` shows the current channel `cwd`.
 - `!codex cwd <path>` sets the current channel `cwd`.
 - `!codex cwd reset` resets the current channel `cwd` back to `CODEX_WORKSPACE`.
+- `!codex access` shows the current sandbox access mode for the channel workspace.
+- `!codex access workspace-write|read-only|full-access|reset` overrides the channel workspace sandbox mode.
+- `!codex network` shows whether network access is enabled for the current channel workspace.
+- `!codex network on|off|reset` overrides network access for the current channel workspace.
 - `!codex reset` drops the current Discord-to-Codex mapping for that conversation.
 - `!codex restart` exits the bot with code `75`, and the local runner started by `npm start` rebuilds and starts it again.
 

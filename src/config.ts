@@ -1,5 +1,7 @@
 import path from "node:path";
 
+export type SandboxMode = "dangerFullAccess" | "readOnly" | "workspaceWrite";
+
 type SandboxPolicy =
   | { type: "dangerFullAccess" }
   | { type: "readOnly"; networkAccess: boolean }
@@ -46,7 +48,7 @@ export interface Config {
   discordMessageContentIntent: boolean;
   restartAdminUserIds: string[];
   codexWorkspace: string;
-  sandboxMode: string;
+  sandboxMode: SandboxMode;
   sandboxNetworkAccess: boolean;
   sessionStorePath: string;
   appServerCommand: AppServerCommand;
@@ -78,7 +80,7 @@ function splitArgs(value: string | undefined): string[] {
   return value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
 }
 
-export function buildSandboxPolicy(mode: string, networkAccess: boolean, workspace: string): SandboxPolicy {
+export function buildSandboxPolicy(mode: SandboxMode, networkAccess: boolean, workspace: string): SandboxPolicy {
   if (mode === "dangerFullAccess") {
     return { type: "dangerFullAccess" };
   }
@@ -102,7 +104,7 @@ export function buildSandboxPolicy(mode: string, networkAccess: boolean, workspa
 export function loadConfig(): Config {
   const rootDir = process.cwd();
   const codexWorkspace = path.resolve(process.env.CODEX_WORKSPACE ?? rootDir);
-  const sandboxMode = process.env.CODEX_SANDBOX_MODE ?? "workspaceWrite";
+  const sandboxMode = (process.env.CODEX_SANDBOX_MODE ?? "workspaceWrite") as SandboxMode;
   const sandboxNetworkAccess = parseBoolean(process.env.CODEX_SANDBOX_NETWORK, false);
   const sessionStorePath = path.resolve(process.env.SESSION_STORE_PATH ?? ".data/sessions.json");
   const appServerBin = process.env.CODEX_APP_SERVER_BIN || "codex";

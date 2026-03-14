@@ -115,7 +115,9 @@ async function handleChatMessage(message: Message): Promise<void> {
   const conversationKey = getConversationKey(message);
   const workspaceKey = getWorkspaceKey(message);
   const cwd = sessionStore.getWorkspace(workspaceKey) ?? config.codexWorkspace;
-  const sandboxPolicy = buildSandboxPolicy(config.sandboxMode, config.sandboxNetworkAccess, cwd);
+  const sandboxMode = sessionStore.getWorkspaceSandboxMode(workspaceKey) ?? config.sandboxMode;
+  const networkAccess = sessionStore.getWorkspaceNetworkAccess(workspaceKey) ?? config.sandboxNetworkAccess;
+  const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
   const botUserId = discordClient.user?.id;
   if (!botUserId) {
     throw new Error("Discord client user is unavailable");

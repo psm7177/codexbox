@@ -32,3 +32,31 @@ test("session store persists workspace mappings", async () => {
 
   assert.equal(reloaded.getWorkspace("channel:guild:parent"), "/tmp/project");
 });
+
+test("session store persists workspace network access", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const storePath = path.join(tempDir, "sessions.json");
+  const store = new SessionStore(storePath);
+
+  await store.load();
+  await store.setWorkspaceNetworkAccess("channel:guild:parent", true);
+
+  const reloaded = new SessionStore(storePath);
+  await reloaded.load();
+
+  assert.equal(reloaded.getWorkspaceNetworkAccess("channel:guild:parent"), true);
+});
+
+test("session store persists workspace sandbox mode", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-discord-"));
+  const storePath = path.join(tempDir, "sessions.json");
+  const store = new SessionStore(storePath);
+
+  await store.load();
+  await store.setWorkspaceSandboxMode("channel:guild:parent", "dangerFullAccess");
+
+  const reloaded = new SessionStore(storePath);
+  await reloaded.load();
+
+  assert.equal(reloaded.getWorkspaceSandboxMode("channel:guild:parent"), "dangerFullAccess");
+});
