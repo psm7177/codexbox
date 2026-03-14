@@ -1,0 +1,223 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import type { Message } from "discord.js";
+import { createCommandHandlers } from "../src/commands.js";
+import type { Config } from "../src/config.js";
+import { getConversationKey, getWorkspaceKey } from "../src/discord-context.js";
+import { SessionStore } from "../src/session-store.js";
+import { ConversationService } from "../src/state/conversation-service.js";
+import { WorkspaceService } from "../src/state/workspace-service.js";
+import { createMessageCreateHandler } from "../src/chat/message-router.js";
+
+function createConfig(workspace: string): Config {
+  return {
+    discordToken: "token",
+    discordClientId: "client-id",
+    discordMessageContentIntent: false,
+    restartAdminUserIds: [],
+    codexWorkspace: workspace,
+    sandboxMode: "workspaceWrite",
+    sandboxNetworkAccess: false,
+    sessionStorePath: path.join(workspace, ".data", "sessions.json"),
+    appServerCommand: {
+      bin: "codex",
+      args: ["app-server", "--listen", "stdio://"],
+    },
+    clientInfo: {
+      name: "codex_discord",
+      title: "Codex Discord Bridge",
+      version: "0.1.0",
+    },
+    threadDefaults: {
+      cwd: workspace,
+      personality: "pragmatic",
+      approvalPolicy: "never",
+      serviceName: "discord_bot",
+    },
+    turnDefaults: {
+      cwd: workspace,
+      personality: "pragmatic",
+      approvalPolicy: "never",
+      summary: "concise",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+        writableRoots: [workspace],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    },
+  };
+}
+
+interface TestMessageOptions {
+  content?: string;
+  reply?: (content: string) => Promise<unknown>;
+  channel?: {
+    id?: string;
+    name?: string;
+    parentId?: string | null;
+    isThread?: () => boolean;
+    isSendable?: () => boolean;
+  };
+  channelId?: string;
+  guildId?: string | null;
+  guild?: { name: string } | null;
+  inGuild?: () => boolean;
+}
+
+function createMessage(options: TestMessageOptions = {}): Message {
+  const reply = options?.reply ?? (async () => undefined);
+  const channel = {
+    id: "channel-1",
+    name: "general",
+    parentId: null,
+    isThread: () => false,
+    isSendable: () => true,
+    ...options.channel,
+  };
+  const mentionsUsers = { has: () => true };
+  const message = {
+    content: "<@bot-1> hello",
+    channelId: "channel-1",
+    guildId: "guild-1",
+    guild: { name: "Guild" },
+    channel,
+    author: {
+      id: "user-1",
+      bot: false,
+      username: "alice",
+      tag: "alice#0001",
+    },
+    mentions: {
+      users: mentionsUsers,
+      repliedUser: null,
+    },
+    reference: null,
+    inGuild: () => true,
+    reply,
+    ...(options.content ? { content: options.content } : {}),
+    ...(options.channelId ? { channelId: options.channelId } : {}),
+    ...(options.guildId !== undefined ? { guildId: options.guildId } : {}),
+    ...(options.guild !== undefined ? { guild: options.guild } : {}),
+    ...(options.inGuild ? { inGuild: options.inGuild } : {}),
+  };
+  return message as unknown as Message;
+}
+
+test("message router routes commands to command handlers", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    workspaceService,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  let ensureThreadCalled = false;
+  let runTurnCalled = false;
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        ensureThreadCalled = true;
+        return "thread-1";
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for commands");
+      },
+    },
+    commandHandlers,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {
+      runTurnCalled = true;
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex status",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(ensureThreadCalled, false);
+  assert.equal(runTurnCalled, false);
+  assert.equal(
+    replies[0],
+    "cwd: `" +
+      config.codexWorkspace +
+      "`\naccess: `workspace-write`\nnetwork: `off`\nNo Codex session is mapped to this conversation yet.",
+  );
+});
+
+test("message router resolves workspace and runs a Codex turn for chat messages", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspace("channel:guild-1:channel-1", path.join(workspace, "project"));
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    workspaceService,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const calls: Array<{ threadId: string; text: string; cwd: string }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      calls.push({
+        threadId: options.threadId,
+        text: options.text,
+        cwd: options.cwd,
+      });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  const message = createMessage({
+    content: "<@bot-1> summarize this repo",
+  });
+
+  await handler(message);
+
+  assert.deepEqual(calls, [
+    {
+      threadId: "thread-123",
+      text: "summarize this repo",
+      cwd: path.join(workspace, "project"),
+    },
+  ]);
+  assert.equal(sessionStore.get(getConversationKey(message))?.threadId, "thread-123");
+});

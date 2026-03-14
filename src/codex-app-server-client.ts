@@ -1,40 +1,15 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import readline from "node:readline";
+import {
+  JsonRpcChildProcessTransport,
+  JsonRpcRequestError,
+  type JsonRpcServerRequest,
+} from "./codex/jsonrpc-transport.js";
 import type { Config } from "./config.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
   reject: (reason?: unknown) => void;
-}
-
-interface RequestMessage {
-  jsonrpc: "2.0";
-  id: number;
-  method: string;
-  params?: unknown;
-}
-
-interface NotificationMessage {
-  jsonrpc: "2.0";
-  method: string;
-  params?: unknown;
-}
-
-interface ResultResponseMessage {
-  jsonrpc: "2.0";
-  id: number;
-  result: unknown;
-}
-
-interface ErrorResponseMessage {
-  jsonrpc: "2.0";
-  id: number;
-  error: {
-    code: number;
-    message: string;
-  };
 }
 
 interface PendingTurn {
@@ -86,20 +61,27 @@ function getErrorMessage(error: unknown): string {
 
 export class CodexAppServerClient extends EventEmitter {
   private readonly config: Config;
-  private child: ChildProcessWithoutNullStreams | null;
-  private reader: readline.Interface | null;
-  private nextId: number;
-  private pendingRequests: Map<number, Deferred<unknown>>;
+  private readonly transport: JsonRpcChildProcessTransport;
   private readyPromise: Promise<void> | null;
   private activeTurns: Map<string, PendingTurn>;
 
   constructor(config: Config) {
     super();
     this.config = config;
-    this.child = null;
-    this.reader = null;
-    this.nextId = 1;
-    this.pendingRequests = new Map();
+    this.transport = new JsonRpcChildProcessTransport({
+      command: this.config.appServerCommand,
+      cwd: process.cwd(),
+      env: process.env,
+      onLog: (line) => this.emit("log", line),
+      onExit: (error) => {
+        this.readyPromise = null;
+        this.emit("exit", error);
+      },
+      onNotification: (method, params) => {
+        this.handleNotification(method, params);
+      },
+      onRequest: async (request) => this.handleServerRequest(request),
+    });
     this.readyPromise = null;
     this.activeTurns = new Map();
   }
@@ -112,54 +94,10 @@ export class CodexAppServerClient extends EventEmitter {
     const deferred = createDeferred<void>();
     this.readyPromise = deferred.promise;
 
-    const child = spawn(this.config.appServerCommand.bin, this.config.appServerCommand.args, {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.child = child;
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      const message = chunk.toString("utf8").trim();
-      if (message) {
-        this.emit("log", message);
-      }
-    });
-
-    child.on("exit", (code, signal) => {
-      const error = new Error(`Codex app-server exited (code=${code}, signal=${signal})`);
-      for (const pending of this.pendingRequests.values()) {
-        pending.reject(error);
-      }
-      this.pendingRequests.clear();
-      this.readyPromise = null;
-      this.child = null;
-      this.reader = null;
-      this.emit("exit", error);
-    });
-
-    this.reader = readline.createInterface({ input: child.stdout });
-    this.reader.on("line", (line) => {
-      this.handleLine(line);
-    });
-
     try {
-      await new Promise<void>((resolve, reject) => {
-        child.once("spawn", () => resolve());
-        child.once("error", reject);
-      });
-
-      const initId = this.nextId++;
-      const initDeferred = createDeferred<unknown>();
-      this.pendingRequests.set(initId, initDeferred);
-      this.write({
-        jsonrpc: "2.0",
-        id: initId,
-        method: "initialize",
-        params: { clientInfo: this.config.clientInfo },
-      });
-      await initDeferred.promise;
-      this.notify("initialized", {});
+      await this.transport.start();
+      await this.transport.request("initialize", { clientInfo: this.config.clientInfo });
+      await this.transport.notify("initialized", {});
       deferred.resolve();
     } catch (error) {
       deferred.reject(error);
@@ -253,103 +191,33 @@ export class CodexAppServerClient extends EventEmitter {
 
   async request(method: string, params: unknown): Promise<unknown> {
     await this.ensureStarted();
-    const id = this.nextId++;
-    const deferred = createDeferred<unknown>();
-    this.pendingRequests.set(id, deferred);
-    this.write({ jsonrpc: "2.0", id, method, params });
-    return deferred.promise;
+    return this.transport.request(method, params);
   }
 
   notify(method: string, params: unknown): void {
-    this.write({ jsonrpc: "2.0", method, params });
+    void this.transport.notify(method, params);
   }
 
-  private write(message: RequestMessage | NotificationMessage | ResultResponseMessage | ErrorResponseMessage): void {
-    if (!this.child?.stdin.writable) {
-      throw new Error("Codex app-server stdin is not writable");
-    }
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
-  }
-
-  private handleLine(line: string): void {
-    if (!line.trim()) {
-      return;
-    }
-
-    const message = JSON.parse(line) as {
-      id?: number;
-      method?: string;
-      params?: Record<string, unknown>;
-      result?: unknown;
-      error?: { message?: string };
-    };
-
-    if (message.id != null && Object.prototype.hasOwnProperty.call(message, "result")) {
-      const pending = this.pendingRequests.get(message.id);
-      if (pending) {
-        this.pendingRequests.delete(message.id);
-        pending.resolve(message.result);
-      }
-      return;
-    }
-
-    if (message.id != null && Object.prototype.hasOwnProperty.call(message, "error")) {
-      const pending = this.pendingRequests.get(message.id);
-      if (pending) {
-        this.pendingRequests.delete(message.id);
-        pending.reject(new Error(message.error?.message ?? "Unknown Codex app-server error"));
-      }
-      return;
-    }
-
-    if (message.id != null && message.method) {
-      void this.handleServerRequest(message);
-      return;
-    }
-
-    if (message.method) {
-      this.handleNotification(message.method, message.params ?? {});
-    }
-  }
-
-  private async handleServerRequest(message: {
-    id?: number;
-    method?: string;
-    params?: Record<string, unknown>;
-  }): Promise<void> {
-    const { id, method, params } = message;
-
-    if (id == null || !method) {
-      return;
-    }
-
+  private async handleServerRequest({ method, params }: JsonRpcServerRequest): Promise<unknown> {
     if (method === "item/commandExecution/requestApproval") {
-      this.write({ jsonrpc: "2.0", id, result: { decision: "decline" } });
-      return;
+      return { decision: "decline" };
     }
 
     if (method === "item/fileChange/requestApproval") {
-      this.write({ jsonrpc: "2.0", id, result: { decision: "decline" } });
-      return;
+      return { decision: "decline" };
     }
 
     if (method === "item/permissions/requestApproval") {
-      this.write({ jsonrpc: "2.0", id, result: { permissions: {}, scope: "turn" } });
-      return;
+      return { permissions: {}, scope: "turn" };
     }
 
     if (method === "item/tool/requestUserInput") {
       const questions = (params?.questions as Array<{ id: string }> | undefined) ?? [];
       const answers = Object.fromEntries(questions.map((question) => [question.id, { answers: [] }]));
-      this.write({ jsonrpc: "2.0", id, result: { answers } });
-      return;
+      return { answers };
     }
 
-    this.write({
-      jsonrpc: "2.0",
-      id,
-      error: { code: -32601, message: `Unsupported server request: ${method}` },
-    });
+    throw new JsonRpcRequestError(-32601, `Unsupported server request: ${method}`);
   }
 
   private handleNotification(method: string, params: Record<string, unknown>): void {

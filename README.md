@@ -125,6 +125,73 @@ sudo loginctl enable-linger "$USER"
 
 TypeScript sources live under `src/` and compile to `dist/`.
 
+## Project Layout
+
+```text
+.
+├── README.md
+├── REFACTOR_TODO.md
+├── scripts
+│   ├── install-public-linux.sh
+│   ├── lib
+│   │   ├── common.sh
+│   │   └── systemd.sh
+│   ├── run-bot.mjs
+│   └── setup-linux.sh
+├── src
+│   ├── chat
+│   │   ├── message-router.ts
+│   │   └── turn-runner.ts
+│   ├── codex
+│   │   └── jsonrpc-transport.ts
+│   ├── commands
+│   │   ├── access.ts
+│   │   ├── cwd.ts
+│   │   ├── format.ts
+│   │   ├── help.ts
+│   │   ├── network.ts
+│   │   ├── reset.ts
+│   │   ├── restart.ts
+│   │   ├── status.ts
+│   │   └── types.ts
+│   ├── discord
+│   │   └── message-sender.ts
+│   ├── startup
+│   │   ├── admin-startup-log.ts
+│   │   └── ready-handler.ts
+│   ├── state
+│   │   ├── conversation-service.ts
+│   │   └── workspace-service.ts
+│   ├── codex-app-server-client.ts
+│   ├── commands.ts
+│   ├── config.ts
+│   ├── discord-context.ts
+│   ├── discord-images.ts
+│   ├── index.ts
+│   ├── response-status.ts
+│   └── session-store.ts
+└── test
+    ├── admin-startup-log.test.ts
+    ├── discord-context.test.ts
+    ├── discord-images.test.ts
+    ├── message-router.test.ts
+    ├── response-status.test.ts
+    ├── session-store.test.ts
+    ├── turn-runner.test.ts
+    └── workspace-service.test.ts
+```
+
+High-level responsibilities:
+
+- `src/index.ts`: bootstrap and wiring
+- `src/chat/`: Discord message routing and Codex turn execution
+- `src/codex/`: JSON-RPC transport for the Codex app-server process
+- `src/commands/`: per-command handlers for `!codex ...`
+- `src/discord/`: Discord delivery helpers
+- `src/startup/`: admin startup status logging
+- `src/state/`: conversation and workspace domain services
+- `scripts/lib/`: shared shell helpers for setup and systemd installation
+
 Useful commands:
 
 ```bash
