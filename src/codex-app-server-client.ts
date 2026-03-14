@@ -16,15 +16,27 @@ interface PendingTurn {
   threadId: string;
   text: string;
   deferred: Deferred<TurnResult>;
+  imageArtifacts: ImageArtifact[];
   onDelta?: (fullText: string, delta: string) => Promise<void> | void;
   onPlan?: (planEvent: PlanEvent) => Promise<void> | void;
   onToolEvent?: (eventName: string, item: ToolItem) => void;
 }
 
 export interface ToolItem {
+  id?: string;
   type?: string;
   command?: string;
   changes?: Array<{ path: string }>;
+  path?: string;
+  result?: string;
+  status?: string;
+  revisedPrompt?: string | null;
+}
+
+export interface ImageArtifact {
+  id?: string;
+  source: "imageView" | "imageGeneration";
+  value: string;
 }
 
 export interface PlanEvent {
@@ -35,6 +47,7 @@ export interface PlanEvent {
 export interface TurnResult {
   status: string;
   text: string;
+  imageArtifacts: ImageArtifact[];
   turn: {
     id: string;
     status: string;
@@ -57,6 +70,25 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function collectImageArtifact(item: ToolItem, artifacts: ImageArtifact[]): void {
+  if (item.type === "imageView" && typeof item.path === "string" && item.path.trim()) {
+    artifacts.push({
+      id: item.id,
+      source: "imageView",
+      value: item.path.trim(),
+    });
+    return;
+  }
+
+  if (item.type === "imageGeneration" && typeof item.result === "string" && item.result.trim()) {
+    artifacts.push({
+      id: item.id,
+      source: "imageGeneration",
+      value: item.result.trim(),
+    });
+  }
 }
 
 export class CodexAppServerClient extends EventEmitter {
@@ -180,6 +212,7 @@ export class CodexAppServerClient extends EventEmitter {
     const deferred = createDeferred<TurnResult>();
     this.activeTurns.set(turnId, {
       threadId,
+      imageArtifacts: [],
       onDelta,
       onPlan,
       onToolEvent,
@@ -239,7 +272,11 @@ export class CodexAppServerClient extends EventEmitter {
 
     if (method === "item/started" || method === "item/completed") {
       const turn = this.activeTurns.get(String(params.turnId));
-      turn?.onToolEvent?.(method, (params.item ?? {}) as ToolItem);
+      const item = (params.item ?? {}) as ToolItem;
+      if (turn && method === "item/completed") {
+        collectImageArtifact(item, turn.imageArtifacts);
+      }
+      turn?.onToolEvent?.(method, item);
       return;
     }
 
@@ -263,6 +300,7 @@ export class CodexAppServerClient extends EventEmitter {
       turn.deferred.resolve({
         status: completedTurn.status,
         text: turn.text.trim(),
+        imageArtifacts: turn.imageArtifacts,
         turn: completedTurn,
       });
       return;

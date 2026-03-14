@@ -2,7 +2,7 @@ import type { Message } from "discord.js";
 import type { CodexAppServerClient, ToolItem } from "../codex-app-server-client.js";
 import type { Config } from "../config.js";
 import { editMessageIfChanged, sendImagesToChannel, sendToChannel } from "../discord/message-sender.js";
-import { extractImageMarkers, resolveLocalImages } from "../discord-images.js";
+import { resolveImageArtifacts } from "../discord-images.js";
 import { splitDiscordMessage } from "../discord-context.js";
 import { formatCompletionMessage, formatProgressMessage, summarizeToolItem } from "../response-status.js";
 
@@ -107,12 +107,11 @@ export async function runCodexTurn(options: {
     );
 
     const finalText = result.text || "";
-    const { cleanText, imageReferences } = extractImageMarkers(finalText);
-    const { images, errors } = await resolveLocalImages(imageReferences, {
+    const { images, errors } = await resolveImageArtifacts(result.imageArtifacts, {
       cwd: options.cwd,
       allowedRoots: [options.cwd, options.codexWorkspace, "/tmp"],
     });
-    const chunks = splitDiscordMessage(cleanText);
+    const chunks = splitDiscordMessage(finalText);
 
     if (chunks.length === 0 && images.length === 0) {
       await sendToChannel(options.message, "No assistant text returned.");

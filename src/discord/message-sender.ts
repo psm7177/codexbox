@@ -5,9 +5,17 @@ export interface EditableMessage {
 }
 
 export interface LocalImageAttachment {
+  kind: "attachment";
   resolvedPath: string;
   filename: string;
 }
+
+export interface RemoteImageReference {
+  kind: "url";
+  url: string;
+}
+
+export type DiscordImage = LocalImageAttachment | RemoteImageReference;
 
 export async function sendToChannel(message: Message, content: string): Promise<void> {
   if (!message.channel?.isSendable?.()) {
@@ -16,12 +24,17 @@ export async function sendToChannel(message: Message, content: string): Promise<
   await message.channel.send(content);
 }
 
-export async function sendImagesToChannel(message: Message, imagePaths: LocalImageAttachment[]): Promise<void> {
+export async function sendImagesToChannel(message: Message, imagePaths: DiscordImage[]): Promise<void> {
   if (!message.channel?.isSendable?.()) {
     throw new Error("Message channel is not sendable");
   }
 
   for (const image of imagePaths) {
+    if (image.kind === "url") {
+      await message.channel.send(image.url);
+      continue;
+    }
+
     const attachment = new AttachmentBuilder(image.resolvedPath, { name: image.filename });
     await message.channel.send({ files: [attachment] });
   }

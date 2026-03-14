@@ -16,6 +16,11 @@ test("summarizeToolItem formats command executions compactly", () => {
   assert.equal(summary, "exec: npm run build -- --watch");
 });
 
+test("summarizeToolItem ignores agent and user message items", () => {
+  assert.equal(summarizeToolItem({ type: "agentMessage" }), null);
+  assert.equal(summarizeToolItem({ type: "userMessage" }), null);
+});
+
 test("formatProgressMessage shows active, used, and preview sections", () => {
   const progress = formatProgressMessage({
     isWriting: false,

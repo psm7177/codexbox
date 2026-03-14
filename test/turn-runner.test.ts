@@ -59,6 +59,12 @@ test("runCodexTurn updates progress and sends the final text", async () => {
         return {
           status: "completed",
           text: "Final answer.",
+          imageArtifacts: [
+            {
+              source: "imageGeneration",
+              value: "https://example.com/generated.png",
+            },
+          ],
           turn: {
             id: "turn-1",
             status: "completed",
@@ -74,7 +80,7 @@ test("runCodexTurn updates progress and sends the final text", async () => {
   assert.ok(completionEdit);
   assert.ok(completionEdit?.includes("- exec: npm test"));
   assert.equal(completionEdit?.includes("Preview:"), false);
-  assert.deepEqual(discord.sent, ["Final answer."]);
+  assert.deepEqual(discord.sent, ["Final answer.", "https://example.com/generated.png"]);
 });
 
 test("runCodexTurn marks the placeholder as failed when the turn errors", async () => {

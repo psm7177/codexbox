@@ -30,6 +30,10 @@ export function summarizeToolItem(item: ToolItem): string | null {
     return null;
   }
 
+  if (["agentMessage", "userMessage", "reasoning", "reasoningSummary"].includes(item.type)) {
+    return null;
+  }
+
   if (item.type === "commandExecution") {
     const command = normalizeWhitespace(item.command ?? "");
     return command ? `exec: ${command}` : "exec";

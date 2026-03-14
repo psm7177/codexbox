@@ -1,35 +1,22 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import type { ImageArtifact } from "./codex-app-server-client.js";
 
-const IMAGE_MARKER_PATTERN = /\[\[image:(.+?)\]\]/g;
 const SUPPORTED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-export interface ExtractedImageMarkers {
-  cleanText: string;
-  imageReferences: string[];
-}
-
-export interface ResolvedLocalImage {
-  originalPath: string;
+export interface LocalImageAttachment {
+  kind: "attachment";
   resolvedPath: string;
   filename: string;
 }
 
-export function extractImageMarkers(text: string): ExtractedImageMarkers {
-  const imageReferences: string[] = [];
-  const cleanText = text
-    .replace(IMAGE_MARKER_PATTERN, (_, rawPath: string) => {
-      const imagePath = rawPath.trim();
-      if (imagePath) {
-        imageReferences.push(imagePath);
-      }
-      return "";
-    })
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  return { cleanText, imageReferences };
+export interface RemoteImageReference {
+  kind: "url";
+  url: string;
 }
+
+export type ResolvedDiscordImage = LocalImageAttachment | RemoteImageReference;
 
 function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
   const relative = path.relative(rootPath, targetPath);
@@ -50,44 +37,130 @@ async function resolveAllowedRoots(roots: string[]): Promise<string[]> {
   return Array.from(new Set(resolvedRoots));
 }
 
-export async function resolveLocalImages(
-  imageReferences: string[],
+function isRemoteUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function getExtensionForMimeType(mimeType: string): string | null {
+  const normalized = mimeType.toLowerCase();
+  if (normalized === "image/png") {
+    return ".png";
+  }
+  if (normalized === "image/jpeg") {
+    return ".jpg";
+  }
+  if (normalized === "image/gif") {
+    return ".gif";
+  }
+  if (normalized === "image/webp") {
+    return ".webp";
+  }
+  return null;
+}
+
+async function resolveLocalImage(
+  reference: string,
   options: { cwd: string; allowedRoots: string[] },
-): Promise<{ images: ResolvedLocalImage[]; errors: string[] }> {
+): Promise<{ image?: LocalImageAttachment; error?: string }> {
   const allowedRoots = await resolveAllowedRoots(options.allowedRoots);
-  const images: ResolvedLocalImage[] = [];
-  const errors: string[] = [];
+  const candidatePath = path.isAbsolute(reference) ? reference : path.resolve(options.cwd, reference);
+  const normalizedPath = path.resolve(candidatePath);
 
-  for (const reference of imageReferences) {
-    const candidatePath = path.isAbsolute(reference) ? reference : path.resolve(options.cwd, reference);
-    const normalizedPath = path.resolve(candidatePath);
+  try {
+    const realPath = await fs.realpath(normalizedPath);
+    const stats = await fs.stat(realPath);
+    if (!stats.isFile()) {
+      return { error: `image is not a file: ${reference}` };
+    }
 
-    try {
-      const realPath = await fs.realpath(normalizedPath);
-      const stats = await fs.stat(realPath);
-      if (!stats.isFile()) {
-        errors.push(`image is not a file: ${reference}`);
-        continue;
-      }
+    const extension = path.extname(realPath).toLowerCase();
+    if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
+      return { error: `unsupported image type: ${reference}` };
+    }
 
-      const extension = path.extname(realPath).toLowerCase();
-      if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
-        errors.push(`unsupported image type: ${reference}`);
-        continue;
-      }
+    if (!allowedRoots.some((root) => isPathWithinRoot(realPath, root))) {
+      return { error: `image is outside allowed roots: ${reference}` };
+    }
 
-      if (!allowedRoots.some((root) => isPathWithinRoot(realPath, root))) {
-        errors.push(`image is outside allowed roots: ${reference}`);
-        continue;
-      }
-
-      images.push({
-        originalPath: reference,
+    return {
+      image: {
+        kind: "attachment",
         resolvedPath: realPath,
         filename: path.basename(realPath),
+      },
+    };
+  } catch {
+    return { error: `image not found: ${reference}` };
+  }
+}
+
+async function resolveDataUrl(dataUrl: string): Promise<{ image?: LocalImageAttachment; error?: string }> {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) {
+    return { error: "unsupported data URL image format" };
+  }
+
+  const mimeType = match[1] ?? "";
+  const encoded = match[2] ?? "";
+  const extension = getExtensionForMimeType(mimeType);
+  if (!extension) {
+    return { error: `unsupported image type: ${mimeType}` };
+  }
+
+  const filePath = path.join(os.tmpdir(), `codex-discord-image-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+  await fs.writeFile(filePath, Buffer.from(encoded, "base64"));
+  return {
+    image: {
+      kind: "attachment",
+      resolvedPath: filePath,
+      filename: path.basename(filePath),
+    },
+  };
+}
+
+export async function resolveImageArtifacts(
+  artifacts: ImageArtifact[],
+  options: { cwd: string; allowedRoots: string[] },
+): Promise<{ images: ResolvedDiscordImage[]; errors: string[] }> {
+  const images: ResolvedDiscordImage[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+
+  for (const artifact of artifacts) {
+    const value = artifact.value.trim();
+    if (!value) {
+      continue;
+    }
+
+    const dedupeKey = `${artifact.source}:${value}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+
+    if (isRemoteUrl(value)) {
+      images.push({
+        kind: "url",
+        url: value,
       });
-    } catch {
-      errors.push(`image not found: ${reference}`);
+      continue;
+    }
+
+    if (value.startsWith("data:image/")) {
+      const { image, error } = await resolveDataUrl(value);
+      if (image) {
+        images.push(image);
+      } else if (error) {
+        errors.push(error);
+      }
+      continue;
+    }
+
+    const { image, error } = await resolveLocalImage(value, options);
+    if (image) {
+      images.push(image);
+    } else if (error) {
+      errors.push(error);
     }
   }
 
