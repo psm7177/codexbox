@@ -116,7 +116,7 @@ export function buildCodexTurnInput(message: Message, userText: string): string 
     `channel_id: ${message.channelId}`,
     `guild_id: ${message.guildId ?? "dm"}`,
     `conversation_kind: ${conversationKind}`,
-    "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.",
+    "If the MCP tools `send_discord_image` or `send_discord_file` are available and the user asks you to send an image or file into Discord, use them with the current channel_id instead of only mentioning the file path in text.",
     "[/Discord runtime context]",
     "",
     userText,

@@ -332,7 +332,7 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
             "channel_id: channel-1\n" +
             "guild_id: guild-1\n" +
             "conversation_kind: channel\n" +
-            "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.\n" +
+            "If the MCP tools `send_discord_image` or `send_discord_file` are available and the user asks you to send an image or file into Discord, use them with the current channel_id instead of only mentioning the file path in text.\n" +
             "[/Discord runtime context]\n\n" +
             "summarize this repo",
         },

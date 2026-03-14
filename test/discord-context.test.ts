@@ -54,6 +54,7 @@ test("buildCodexTurnInput includes current Discord runtime context", () => {
   assert.match(input, /guild_id: guild-456/);
   assert.match(input, /conversation_kind: channel/);
   assert.match(input, /send_discord_image/);
+  assert.match(input, /send_discord_file/);
   assert.match(input, /send the chart$/);
 });
 
