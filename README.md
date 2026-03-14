@@ -50,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/psm7177/codexbox/master/scripts/ins
 This bootstrap script:
 
 - clones or updates `https://github.com/psm7177/codexbox.git`
-- runs `scripts/setup-linux.sh`
+- runs `scripts/setup-linux.sh` with systemd registration enabled
 
 The local setup script then:
 
@@ -60,12 +60,24 @@ The local setup script then:
 - prompts for `DISCORD_TOKEN` from the terminal, even when run through `curl | bash`
 - sets `CODEX_WORKSPACE=.`
 - runs the first build
+- installs a `codex-discord` systemd service
+- starts that service immediately
 
-After that, start the bot with:
+By default it prefers a system service and falls back to a user service when sudo is unavailable in the current session.
+When it installs a user service, it also tries to enable linger by default so the bot keeps running after logout.
+
+After that, manage the bot with either:
 
 ```bash
-cd codexbox
-npm start
+sudo systemctl status codex-discord --no-pager
+sudo journalctl -u codex-discord -f
+```
+
+or, for a user service:
+
+```bash
+systemctl --user status codex-discord --no-pager
+journalctl --user -u codex-discord -f
 ```
 
 If you already cloned the repo manually, you can still run:
@@ -74,10 +86,41 @@ If you already cloned the repo manually, you can still run:
 bash scripts/setup-linux.sh
 ```
 
+To install the same systemd service from an existing checkout:
+
+```bash
+INSTALL_SYSTEMD_SERVICE=1 bash scripts/setup-linux.sh
+```
+
 If you want to avoid the prompt entirely, this also works:
 
 ```bash
 DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
+```
+
+You can override the generated systemd unit name or user when needed:
+
+```bash
+SYSTEMD_SERVICE_NAME=my-codex-bot SYSTEMD_SERVICE_USER=ubuntu INSTALL_SYSTEMD_SERVICE=1 bash scripts/setup-linux.sh
+```
+
+You can also force the service scope:
+
+```bash
+SYSTEMD_SERVICE_SCOPE=system INSTALL_SYSTEMD_SERVICE=1 bash scripts/setup-linux.sh
+SYSTEMD_SERVICE_SCOPE=user INSTALL_SYSTEMD_SERVICE=1 bash scripts/setup-linux.sh
+```
+
+If you want to skip that behavior:
+
+```bash
+SYSTEMD_ENABLE_LINGER=0 SYSTEMD_SERVICE_SCOPE=user INSTALL_SYSTEMD_SERVICE=1 bash scripts/setup-linux.sh
+```
+
+Manual linger command:
+
+```bash
+sudo loginctl enable-linger "$USER"
 ```
 
 TypeScript sources live under `src/` and compile to `dist/`.
