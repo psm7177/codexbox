@@ -37,15 +37,18 @@ Discord bot that treats Discord channels as Codex workspaces and Discord convers
 
 ## Quick Linux Setup
 
-If you publish this repo to GitHub, a Linux host can bootstrap it with:
+For a public GitHub repo, a Linux host can bootstrap directly from GitHub with:
 
 ```bash
-git clone <your-repo-url>
-cd codex-discord
-bash scripts/setup-linux.sh
+curl -fsSL https://raw.githubusercontent.com/psm7177/codexbox/master/scripts/install-public-linux.sh | bash
 ```
 
-The script:
+This bootstrap script:
+
+- clones or updates `https://github.com/psm7177/codexbox.git`
+- runs `scripts/setup-linux.sh`
+
+The local setup script then:
 
 - checks for `node`, `npm`, and `codex`
 - runs `npm install`
@@ -57,7 +60,14 @@ The script:
 After that, start the bot with:
 
 ```bash
+cd codexbox
 npm start
+```
+
+If you already cloned the repo manually, you can still run:
+
+```bash
+bash scripts/setup-linux.sh
 ```
 
 TypeScript sources live under `src/` and compile to `dist/`.
