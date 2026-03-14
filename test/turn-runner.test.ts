@@ -70,8 +70,10 @@ test("runCodexTurn updates progress and sends the final text", async () => {
 
   assert.match(discord.replies[0] ?? "", /^🔄 Thinking\.\.\./);
   assert.ok(discord.edits.some((content) => content.includes("Preview:\nDraft response in progress.")));
-  assert.ok(discord.edits.some((content) => content.includes("Reply complete.")));
-  assert.ok(discord.edits.some((content) => content.includes("- exec: npm test")));
+  const completionEdit = discord.edits.find((content) => content.includes("Reply complete."));
+  assert.ok(completionEdit);
+  assert.ok(completionEdit?.includes("- exec: npm test"));
+  assert.equal(completionEdit?.includes("Preview:"), false);
   assert.deepEqual(discord.sent, ["Final answer."]);
 });
 

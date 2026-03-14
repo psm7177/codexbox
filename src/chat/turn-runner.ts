@@ -4,7 +4,7 @@ import type { Config } from "../config.js";
 import { editMessageIfChanged, sendImagesToChannel, sendToChannel } from "../discord/message-sender.js";
 import { extractImageMarkers, resolveLocalImages } from "../discord-images.js";
 import { splitDiscordMessage } from "../discord-context.js";
-import { formatProgressMessage, summarizeToolItem } from "../response-status.js";
+import { formatCompletionMessage, formatProgressMessage, summarizeToolItem } from "../response-status.js";
 
 function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
   const activeTools: string[] = [];
@@ -78,11 +78,6 @@ export async function runCodexTurn(options: {
 
         await updatePlaceholder();
       },
-      onPlan: async (planEvent) => {
-        if ((planEvent.plan ?? []).length > 0) {
-          await updatePlaceholder(true);
-        }
-      },
       onToolEvent: (eventName: string, item: ToolItem) => {
         const summary = summarizeToolItem(item);
         if (!summary) {
@@ -107,13 +102,7 @@ export async function runCodexTurn(options: {
 
     await editMessageIfChanged(
       placeholder,
-      formatProgressMessage({
-        headline: "Reply complete.",
-        isWriting: false,
-        activeTools: formatActiveToolList(activeToolCounts),
-        usedTools: toolEvents,
-        previewText,
-      }),
+      formatCompletionMessage(toolEvents),
       lastRendered,
     );
 

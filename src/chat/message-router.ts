@@ -9,6 +9,7 @@ import {
   shouldHandleMessage,
   stripBotMention,
 } from "../discord-context.js";
+import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
 import { runCodexTurn } from "./turn-runner.js";
@@ -18,6 +19,7 @@ type CommandHandler = (message: Message, args: string[]) => Promise<void>;
 interface MessageRouterOptions {
   config: Config;
   conversationService: ConversationService;
+  restartCoordinator: RestartCoordinator;
   workspaceService: WorkspaceService;
   codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn">;
   commandHandlers: Record<string, CommandHandler>;
@@ -72,14 +74,9 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
   const runTurn = options.runTurn ?? runCodexTurn;
   const log = options.log ?? console.log;
   const errorLog = options.errorLog ?? console.error;
+  const restartReply = "Restart requested. Not accepting new requests until shutdown completes.";
 
   async function handleChatMessage(message: Message): Promise<void> {
-    const conversationKey = getConversationKey(message);
-    const workspaceKey = getWorkspaceKey(message);
-    const cwd = options.workspaceService.getCwd(workspaceKey);
-    const sandboxMode = options.workspaceService.getSandboxMode(workspaceKey);
-    const networkAccess = options.workspaceService.getNetworkAccess(workspaceKey);
-    const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
     const botUserId = options.getBotUserId();
     if (!botUserId) {
       throw new Error("Discord client user is unavailable");
@@ -95,9 +92,14 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       return;
     }
 
+    const command = parseCommand(rawText);
+    if (options.restartCoordinator.isRestartPending() && command?.name !== "restart") {
+      await message.reply(restartReply);
+      return;
+    }
+
     log(`[discord] ${describeMessageSource(message)} <${message.author.tag}> ${rawText}`);
 
-    const command = parseCommand(rawText);
     if (command) {
       const handler = options.commandHandlers[command.name];
       if (!handler) {
@@ -108,27 +110,43 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       return;
     }
 
+    const conversationKey = getConversationKey(message);
+    const workspaceKey = getWorkspaceKey(message);
     await serializeConversation(conversationKey, async () => {
-      let session = options.conversationService.getSession(conversationKey);
-      const threadId = await options.codexClient.ensureThread({
-        threadId: session?.threadId,
-        name: getThreadDisplayName(message),
-        cwd,
-      });
-
-      if (!session || session.threadId !== threadId) {
-        session = await options.conversationService.saveThread(conversationKey, threadId);
+      if (!options.restartCoordinator.beginTurn()) {
+        await message.reply(restartReply);
+        return;
       }
 
-      await runTurn({
-        message,
-        threadId,
-        text: rawText,
-        cwd,
-        codexWorkspace: options.config.codexWorkspace,
-        sandboxPolicy,
-        codexClient: options.codexClient,
-      });
+      const cwd = options.workspaceService.getCwd(workspaceKey);
+      const sandboxMode = options.workspaceService.getSandboxMode(workspaceKey);
+      const networkAccess = options.workspaceService.getNetworkAccess(workspaceKey);
+      const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
+
+      let session = options.conversationService.getSession(conversationKey);
+      try {
+        const threadId = await options.codexClient.ensureThread({
+          threadId: session?.threadId,
+          name: getThreadDisplayName(message),
+          cwd,
+        });
+
+        if (!session || session.threadId !== threadId) {
+          session = await options.conversationService.saveThread(conversationKey, threadId);
+        }
+
+        await runTurn({
+          message,
+          threadId,
+          text: rawText,
+          cwd,
+          codexWorkspace: options.config.codexWorkspace,
+          sandboxPolicy,
+          codexClient: options.codexClient,
+        });
+      } finally {
+        options.restartCoordinator.endTurn();
+      }
     });
   }
 

@@ -7,7 +7,21 @@ export function createRestartCommand(context: CommandContext): CommandHandler {
       return;
     }
 
-    await message.reply("Restarting...");
-    setTimeout(() => process.exit(75), 500);
+    const result = context.restartCoordinator.requestRestart();
+    if (result.alreadyPending) {
+      await message.reply("Restart is already scheduled. New requests are paused until shutdown.");
+      return;
+    }
+
+    if (result.activeTurns === 0) {
+      await message.reply("Restart scheduled. No active replies remain, shutting down now.");
+      context.restartCoordinator.maybeExit();
+      return;
+    }
+
+    await message.reply(
+      `Restart scheduled. Waiting for ${result.activeTurns} active repl${result.activeTurns === 1 ? "y" : "ies"} to finish.`,
+    );
+    context.restartCoordinator.maybeExit();
   };
 }

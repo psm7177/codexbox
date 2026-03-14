@@ -7,6 +7,7 @@ import type { Message } from "discord.js";
 import { createCommandHandlers } from "../src/commands.js";
 import type { Config } from "../src/config.js";
 import { getConversationKey, getWorkspaceKey } from "../src/discord-context.js";
+import { RestartCoordinator } from "../src/lifecycle/restart-coordinator.js";
 import { SessionStore } from "../src/session-store.js";
 import { ConversationService } from "../src/state/conversation-service.js";
 import { WorkspaceService } from "../src/state/workspace-service.js";
@@ -114,9 +115,11 @@ test("message router routes commands to command handlers", async () => {
   const sessionStore = new SessionStore(config.sessionStorePath);
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
+    restartCoordinator,
     workspaceService,
     getConversationKey,
     getWorkspaceKey,
@@ -127,6 +130,7 @@ test("message router routes commands to command handlers", async () => {
   const handler = createMessageCreateHandler({
     config,
     conversationService,
+    restartCoordinator,
     workspaceService,
     codexClient: {
       async ensureThread() {
@@ -173,9 +177,11 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
   await sessionStore.setWorkspace("channel:guild-1:channel-1", path.join(workspace, "project"));
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
+    restartCoordinator,
     workspaceService,
     getConversationKey,
     getWorkspaceKey,
@@ -184,6 +190,7 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
   const handler = createMessageCreateHandler({
     config,
     conversationService,
+    restartCoordinator,
     workspaceService,
     codexClient: {
       async ensureThread() {
@@ -220,4 +227,53 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
     },
   ]);
   assert.equal(sessionStore.get(getConversationKey(message))?.threadId, "thread-123");
+});
+
+test("message router rejects new work while restart is pending", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  restartCoordinator.requestRestart();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called while restart is pending");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called while restart is pending");
+      },
+    },
+    commandHandlers,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> summarize this repo",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.deepEqual(replies, ["Restart requested. Not accepting new requests until shutdown completes."]);
 });
