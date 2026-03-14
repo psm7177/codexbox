@@ -1,5 +1,6 @@
 import { createAccessCommand } from "./commands/access.js";
 import { createCwdCommand } from "./commands/cwd.js";
+import { createErrorCommand } from "./commands/error.js";
 import { createHelpCommand } from "./commands/help.js";
 import { createNetworkCommand } from "./commands/network.js";
 import { createResetCommand } from "./commands/reset.js";
@@ -29,5 +30,6 @@ export function createCommandHandlers(context: CommandContext): Record<string, C
     network: createNetworkCommand(context),
     reset: createResetCommand(context),
     restart: createRestartCommand(context),
+    error: createErrorCommand(context),
   };
 }

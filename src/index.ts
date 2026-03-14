@@ -5,6 +5,7 @@ import { CodexAppServerClient } from "./codex-app-server-client.js";
 import { createCommandHandlers } from "./commands.js";
 import { loadConfig } from "./config.js";
 import { getConversationKey, getWorkspaceKey } from "./discord-context.js";
+import { ErrorTracker } from "./error-tracker.js";
 import { RestartCoordinator } from "./lifecycle/restart-coordinator.js";
 import { SessionStore } from "./session-store.js";
 import { ConversationService } from "./state/conversation-service.js";
@@ -13,6 +14,7 @@ import { createReadyHandler } from "./startup/ready-handler.js";
 
 const config = loadConfig();
 const restartCoordinator = new RestartCoordinator();
+const errorTracker = new ErrorTracker();
 
 if (!config.discordToken) {
   throw new Error("DISCORD_TOKEN is required");
@@ -42,6 +44,7 @@ const commandHandlers = createCommandHandlers({
   conversationService,
   restartCoordinator,
   workspaceService,
+  errorTracker,
   getConversationKey,
   getWorkspaceKey,
 });
@@ -60,6 +63,7 @@ const handleMessageCreate = createMessageCreateHandler({
   workspaceService,
   codexClient,
   commandHandlers,
+  errorTracker,
   getBotUserId: () => discordClient.user?.id,
 });
 

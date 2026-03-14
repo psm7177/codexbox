@@ -11,6 +11,7 @@ import {
   splitDiscordMessage,
   stripBotMention,
 } from "../discord-context.js";
+import type { ErrorTracker } from "../error-tracker.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
@@ -25,6 +26,7 @@ interface MessageRouterOptions {
   workspaceService: WorkspaceService;
   codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn">;
   commandHandlers: Record<string, CommandHandler>;
+  errorTracker: ErrorTracker;
   getBotUserId: () => string | undefined;
   runTurn?: typeof runCodexTurn;
   log?: (line: string) => void;
@@ -80,8 +82,13 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
   const log = options.log ?? console.log;
   const errorLog = options.errorLog ?? console.error;
   const restartReply = "Restart requested. Not accepting new requests until shutdown completes.";
-  const formatBridgeErrorReply = (error: unknown): string =>
-    splitDiscordMessage(`Codex bridge error: ${getErrorMessage(error)}`, 1900)[0] ?? "Codex bridge error.";
+  const formatBridgeErrorReply = (errorId: string, summary: string, isAdmin: boolean): string => {
+    const detailHint = isAdmin ? ` Use \`!codex error ${errorId}\` for details.` : "";
+    return (
+      splitDiscordMessage(`Codex bridge error. Reference: \`${errorId}\`\n${summary}${detailHint}`, 1900)[0] ??
+      `Codex bridge error. Reference: \`${errorId}\``
+    );
+  };
 
   async function handleChatMessage(message: Message): Promise<void> {
     const botUserId = options.getBotUserId();
@@ -166,9 +173,12 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
       await handleChatMessage(message);
     } catch (error) {
-      errorLog(`[discord] ${getErrorMessage(error)}`);
+      const context = `source=${describeMessageSource(message)} user=${message.author.tag}`;
+      const record = options.errorTracker.record(error, context);
+      errorLog(`[discord][${record.id}] ${record.detail}`);
       if (message.channel?.isSendable?.()) {
-        await message.reply(formatBridgeErrorReply(error));
+        const isAdmin = options.config.restartAdminUserIds.includes(message.author.id);
+        await message.reply(formatBridgeErrorReply(record.id, record.summary, isAdmin));
       }
     }
   };

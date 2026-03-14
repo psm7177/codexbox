@@ -7,6 +7,7 @@ import type { Message } from "discord.js";
 import { createCommandHandlers } from "../src/commands.js";
 import type { Config } from "../src/config.js";
 import { getConversationKey, getWorkspaceKey } from "../src/discord-context.js";
+import { ErrorTracker } from "../src/error-tracker.js";
 import { RestartCoordinator } from "../src/lifecycle/restart-coordinator.js";
 import { SessionStore } from "../src/session-store.js";
 import { ConversationService } from "../src/state/conversation-service.js";
@@ -116,11 +117,13 @@ test("message router routes commands to command handlers", async () => {
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
   const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
     restartCoordinator,
     workspaceService,
+    errorTracker,
     getConversationKey,
     getWorkspaceKey,
   });
@@ -142,6 +145,7 @@ test("message router routes commands to command handlers", async () => {
       },
     },
     commandHandlers,
+    errorTracker,
     getBotUserId: () => "bot-1",
     runTurn: async () => {
       runTurnCalled = true;
@@ -178,11 +182,13 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
   const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
     restartCoordinator,
     workspaceService,
+    errorTracker,
     getConversationKey,
     getWorkspaceKey,
   });
@@ -201,6 +207,7 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
       },
     },
     commandHandlers,
+    errorTracker,
     getBotUserId: () => "bot-1",
     runTurn: async (options) => {
       calls.push({
@@ -243,12 +250,14 @@ test("message router rejects new work while restart is pending", async () => {
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
   const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
   restartCoordinator.requestRestart();
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
     restartCoordinator,
     workspaceService,
+    errorTracker,
     getConversationKey,
     getWorkspaceKey,
   });
@@ -267,6 +276,7 @@ test("message router rejects new work while restart is pending", async () => {
       },
     },
     commandHandlers,
+    errorTracker,
     getBotUserId: () => "bot-1",
     log: () => {},
     errorLog: () => {},
@@ -285,22 +295,25 @@ test("message router rejects new work while restart is pending", async () => {
   assert.deepEqual(replies, ["Restart requested. Not accepting new requests until shutdown completes."]);
 });
 
-test("message router truncates oversized bridge error replies", async () => {
+test("message router returns an error reference and logs detail", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
   const config = createConfig(workspace);
   const sessionStore = new SessionStore(config.sessionStorePath);
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
   const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
   const commandHandlers = createCommandHandlers({
     config,
     conversationService,
     restartCoordinator,
     workspaceService,
+    errorTracker,
     getConversationKey,
     getWorkspaceKey,
   });
   const replies: string[] = [];
+  const errorLogs: string[] = [];
   const handler = createMessageCreateHandler({
     config,
     conversationService,
@@ -315,9 +328,12 @@ test("message router truncates oversized bridge error replies", async () => {
       },
     },
     commandHandlers,
+    errorTracker,
     getBotUserId: () => "bot-1",
     log: () => {},
-    errorLog: () => {},
+    errorLog: (line: string) => {
+      errorLogs.push(line);
+    },
   });
 
   await handler(
@@ -331,6 +347,9 @@ test("message router truncates oversized bridge error replies", async () => {
   );
 
   assert.equal(replies.length, 1);
-  assert.ok(replies[0]?.startsWith("Codex bridge error: "));
+  assert.match(replies[0] ?? "", /^Codex bridge error\. Reference: `err-[^`]+`/);
   assert.ok((replies[0]?.length ?? 0) <= 1900);
+  assert.equal(errorLogs.length, 1);
+  assert.match(errorLogs[0] ?? "", /\[discord\]\[err-/);
+  assert.match(errorLogs[0] ?? "", /x{50}/);
 });

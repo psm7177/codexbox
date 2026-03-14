@@ -112,5 +112,5 @@ export function formatProgressMessage(options: {
 
 export function formatCompletionMessage(tools: string[]): string {
   const activity = formatToolActivity(tools);
-  return activity ? `Reply complete.\n\n${activity}` : "Reply complete.";
+  return fitDiscordMessage(activity ? `Reply complete.\n\n${activity}` : "Reply complete.");
 }

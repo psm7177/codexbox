@@ -16,6 +16,7 @@ export function createHelpCommand(): CommandHandler {
         "`!codex network on|off|reset`",
         "`!codex reset`",
         "`!codex restart`",
+        "`!codex error <error-id>` (admin)",
       ].join("\n"),
     );
   };

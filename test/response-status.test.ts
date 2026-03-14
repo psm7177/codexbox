@@ -53,3 +53,10 @@ test("formatCompletionMessage includes full tool activity", () => {
 
   assert.equal(completion, "Reply complete.\n\nTools used:\n- exec: npm test\n- edit: src/index.ts");
 });
+
+test("formatCompletionMessage is capped to Discord-safe length", () => {
+  const completion = formatCompletionMessage(Array.from({ length: 300 }, (_, index) => `exec: tool-${index}`));
+
+  assert.ok(completion.length <= 1900);
+  assert.match(completion, /\.\.\. \(truncated\)$/);
+});
