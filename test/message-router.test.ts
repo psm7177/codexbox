@@ -222,7 +222,14 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
   assert.deepEqual(calls, [
     {
       threadId: "thread-123",
-      text: "summarize this repo",
+      text:
+        "[Discord runtime context]\n" +
+        "channel_id: channel-1\n" +
+        "guild_id: guild-1\n" +
+        "conversation_kind: channel\n" +
+        "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.\n" +
+        "[/Discord runtime context]\n\n" +
+        "summarize this repo",
       cwd: path.join(workspace, "project"),
     },
   ]);
@@ -276,4 +283,54 @@ test("message router rejects new work while restart is pending", async () => {
   );
 
   assert.deepEqual(replies, ["Restart requested. Not accepting new requests until shutdown completes."]);
+});
+
+test("message router truncates oversized bridge error replies", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("x".repeat(5000));
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called");
+      },
+    },
+    commandHandlers,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> summarize this repo",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(replies.length, 1);
+  assert.ok(replies[0]?.startsWith("Codex bridge error: "));
+  assert.ok((replies[0]?.length ?? 0) <= 1900);
 });

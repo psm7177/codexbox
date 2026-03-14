@@ -67,6 +67,25 @@ export function stripBotMention(content: string, clientUserId: string): string {
   return patterns.reduce((text, pattern) => text.replace(pattern, ""), content).trim();
 }
 
+export function buildCodexTurnInput(message: Message, userText: string): string {
+  const conversationKind = !message.inGuild()
+    ? "dm"
+    : message.channel?.isThread?.()
+      ? "thread"
+      : "channel";
+
+  return [
+    "[Discord runtime context]",
+    `channel_id: ${message.channelId}`,
+    `guild_id: ${message.guildId ?? "dm"}`,
+    `conversation_kind: ${conversationKind}`,
+    "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.",
+    "[/Discord runtime context]",
+    "",
+    userText,
+  ].join("\n");
+}
+
 export function splitDiscordMessage(text: string, maxLength = 1900): string[] {
   if (!text) {
     return [];

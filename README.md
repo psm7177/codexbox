@@ -24,6 +24,8 @@ Discord bot that treats Discord channels as Codex workspaces and Discord convers
 - `!codex network on|off|reset` overrides network access for the current channel workspace.
 - `!codex reset` drops the current Discord-to-Codex mapping for that conversation.
 - `!codex restart` exits the bot with code `75`, and the local runner started by `npm start` rebuilds and starts it again.
+- Codex image results are delivered back to Discord from structured app-server items such as `imageView` and `imageGeneration`.
+- When the user explicitly wants an image posted into Discord, Codex can call the MCP tool `send_discord_image`.
 
 ## Requirements
 
@@ -60,6 +62,7 @@ The local setup script then:
 - prompts for `DISCORD_TOKEN` from the terminal, even when run through `curl | bash`
 - sets `CODEX_WORKSPACE=.`
 - runs the first build
+- registers a local Codex MCP server named `codex-discord-tools`
 - installs a `codex-discord` systemd service
 - starts that service immediately
 
@@ -96,6 +99,12 @@ If you want to avoid the prompt entirely, this also works:
 
 ```bash
 DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
+```
+
+If you want to skip MCP registration:
+
+```bash
+INSTALL_CODEX_DISCORD_MCP=0 bash scripts/setup-linux.sh
 ```
 
 You can override the generated systemd unit name or user when needed:
@@ -135,7 +144,9 @@ TypeScript sources live under `src/` and compile to `dist/`.
 │   ├── install-public-linux.sh
 │   ├── lib
 │   │   ├── common.sh
+│   │   ├── codex-mcp.sh
 │   │   └── systemd.sh
+│   ├── mcp-discord-server.mjs
 │   ├── run-bot.mjs
 │   └── setup-linux.sh
 ├── src
@@ -156,6 +167,8 @@ TypeScript sources live under `src/` and compile to `dist/`.
 │   │   └── types.ts
 │   ├── discord
 │   │   └── message-sender.ts
+│   ├── lifecycle
+│   │   └── restart-coordinator.ts
 │   ├── startup
 │   │   ├── admin-startup-log.ts
 │   │   └── ready-handler.ts
@@ -191,6 +204,35 @@ High-level responsibilities:
 - `src/startup/`: admin startup status logging
 - `src/state/`: conversation and workspace domain services
 - `scripts/lib/`: shared shell helpers for setup and systemd installation
+
+## Discord MCP Tool
+
+The setup script registers a local MCP server named `codex-discord-tools` with Codex:
+
+```bash
+codex mcp get codex-discord-tools
+```
+
+That server exposes:
+
+- `send_discord_image(channel_id, image, caption?)`
+
+The bot injects the current Discord `channel_id` into each Codex turn so the model can call this tool when the user explicitly asks for an image to be posted into Discord.
+
+The MCP server reads the repository `.env` on startup, so `DISCORD_TOKEN` does not need to be passed manually through `codex mcp add --env ...`.
+
+Supported `image` inputs:
+
+- absolute or relative local image paths
+- `https://...` image URLs
+- `data:image/...` URLs
+
+Local file access is limited to `CODEX_WORKSPACE`, `$HOME`, `/tmp`, and any extra roots listed in `DISCORD_MCP_ALLOWED_ROOTS`.
+
+Notes:
+
+- long captions are truncated to fit Discord's 2000-character message limit
+- bot-side bridge error replies are also truncated so Discord does not reject them
 
 Useful commands:
 

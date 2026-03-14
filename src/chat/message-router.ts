@@ -3,10 +3,12 @@ import { parseCommand } from "../commands.js";
 import { buildSandboxPolicy, type Config } from "../config.js";
 import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import {
+  buildCodexTurnInput,
   getConversationKey,
   getThreadDisplayName,
   getWorkspaceKey,
   shouldHandleMessage,
+  splitDiscordMessage,
   stripBotMention,
 } from "../discord-context.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
@@ -57,13 +59,16 @@ function createConversationSerializer(): <T>(key: string, task: () => Promise<T>
   return async function serializeConversation<T>(key: string, task: () => Promise<T>): Promise<T> {
     const previous = conversationLocks.get(key) ?? Promise.resolve();
     const current = previous.catch(() => {}).then(task);
-    conversationLocks.set(
-      key,
-      current.finally(() => {
+    void current
+      .finally(() => {
         if (conversationLocks.get(key) === current) {
           conversationLocks.delete(key);
         }
-      }),
+      })
+      .catch(() => {});
+    conversationLocks.set(
+      key,
+      current,
     );
     return current;
   };
@@ -75,6 +80,8 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
   const log = options.log ?? console.log;
   const errorLog = options.errorLog ?? console.error;
   const restartReply = "Restart requested. Not accepting new requests until shutdown completes.";
+  const formatBridgeErrorReply = (error: unknown): string =>
+    splitDiscordMessage(`Codex bridge error: ${getErrorMessage(error)}`, 1900)[0] ?? "Codex bridge error.";
 
   async function handleChatMessage(message: Message): Promise<void> {
     const botUserId = options.getBotUserId();
@@ -138,7 +145,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
         await runTurn({
           message,
           threadId,
-          text: rawText,
+          text: buildCodexTurnInput(message, rawText),
           cwd,
           codexWorkspace: options.config.codexWorkspace,
           sandboxPolicy,
@@ -161,7 +168,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
     } catch (error) {
       errorLog(`[discord] ${getErrorMessage(error)}`);
       if (message.channel?.isSendable?.()) {
-        await message.reply(`Codex bridge error: ${getErrorMessage(error)}`);
+        await message.reply(formatBridgeErrorReply(error));
       }
     }
   };

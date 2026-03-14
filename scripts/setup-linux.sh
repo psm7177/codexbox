@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 EXAMPLE_FILE="$ROOT_DIR/.env.example"
 INSTALL_SYSTEMD_SERVICE="${INSTALL_SYSTEMD_SERVICE:-0}"
+INSTALL_CODEX_DISCORD_MCP="${INSTALL_CODEX_DISCORD_MCP:-1}"
 SYSTEMD_SERVICE_NAME="${SYSTEMD_SERVICE_NAME:-codex-discord}"
 SYSTEMD_ENABLE_NOW="${SYSTEMD_ENABLE_NOW:-1}"
 SYSTEMD_SERVICE_SCOPE="${SYSTEMD_SERVICE_SCOPE:-auto}"
@@ -12,6 +13,7 @@ SYSTEMD_ENABLE_LINGER="${SYSTEMD_ENABLE_LINGER:-1}"
 INSTALLED_SYSTEMD_SERVICE_SCOPE=""
 
 source "$ROOT_DIR/scripts/lib/common.sh"
+source "$ROOT_DIR/scripts/lib/codex-mcp.sh"
 source "$ROOT_DIR/scripts/lib/systemd.sh"
 
 require_command node
@@ -45,6 +47,11 @@ set_env_value "CODEX_WORKSPACE" "."
 
 echo "Building project..."
 npm run build
+
+if is_truthy "$INSTALL_CODEX_DISCORD_MCP"; then
+  echo "Registering Codex MCP server..."
+  install_codex_mcp_server
+fi
 
 if is_truthy "$INSTALL_SYSTEMD_SERVICE"; then
   echo "Installing systemd service..."
