@@ -16,17 +16,17 @@ test("summarizeToolItem formats command executions compactly", () => {
   assert.equal(summary, "exec: npm run build -- --watch");
 });
 
-test("formatProgressMessage shows active, used, and reasoning sections", () => {
+test("formatProgressMessage shows active, used, and preview sections", () => {
   const progress = formatProgressMessage({
     isWriting: false,
     activeTools: ["exec: npm test", "edit: src/index.ts"],
     usedTools: ["exec: npm test", "edit: src/index.ts"],
-    reasoningEntries: ["in_progress: inspect code", "pending: write tests"],
+    previewText: "Draft answer in progress.",
   });
 
   assert.equal(
     progress,
-    "🔄 Thinking...\n\nUsing now:\n- exec: npm test\n- edit: src/index.ts\n\nUsed tools:\n- exec: npm test\n- edit: src/index.ts\n\nReasoning summary:\n- in_progress: inspect code\n- pending: write tests",
+    "🔄 Thinking...\n\nUsing now:\n- exec: npm test\n- edit: src/index.ts\n\nUsed tools:\n- exec: npm test\n- edit: src/index.ts\n\nPreview:\nDraft answer in progress.",
   );
 });
 

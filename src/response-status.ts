@@ -60,6 +60,17 @@ function renderListSection(title: string, items: string[]): string[] {
   return lines;
 }
 
+function renderTextSection(title: string, text: string): string[] {
+  const lines = ["", `${title}:`];
+  if (!text.trim()) {
+    lines.push("- none");
+    return lines;
+  }
+
+  lines.push(text.trim());
+  return lines;
+}
+
 export function formatToolActivity(tools: string[]): string {
   const uniqueTools = uniqueStrings(tools);
   if (uniqueTools.length === 0) {
@@ -86,12 +97,12 @@ export function formatProgressMessage(options: {
   isWriting: boolean;
   activeTools: string[];
   usedTools: string[];
-  reasoningEntries: string[];
+  previewText: string;
 }): string {
   const lines = [options.headline ?? (options.isWriting ? "🔄 Drafting reply..." : "🔄 Thinking...")];
   lines.push(...renderListSection("Using now", options.activeTools));
   lines.push(...renderListSection("Used tools", options.usedTools));
-  lines.push(...renderListSection("Reasoning summary", options.reasoningEntries));
+  lines.push(...renderTextSection("Preview", options.previewText));
   return fitDiscordMessage(lines.join("\n"));
 }
 

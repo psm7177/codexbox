@@ -1,8 +1,9 @@
 import "dotenv/config";
-import { Client, GatewayIntentBits, Partials, type Message } from "discord.js";
+import { AttachmentBuilder, Client, GatewayIntentBits, Partials, type Message } from "discord.js";
 import { CodexAppServerClient, type ToolItem } from "./codex-app-server-client.js";
 import { createCommandHandlers, parseCommand } from "./commands.js";
 import { buildSandboxPolicy, loadConfig } from "./config.js";
+import { extractImageMarkers, resolveLocalImages } from "./discord-images.js";
 import {
   getConversationKey,
   getThreadDisplayName,
@@ -45,6 +46,11 @@ const commandHandlers = createCommandHandlers({
   getWorkspaceKey,
 });
 
+interface AdminStartupLog {
+  adminId: string;
+  message: { edit: (content: string) => Promise<unknown> };
+}
+
 function getChannelName(message: Message): string | undefined {
   const channel = message.channel;
   return "name" in channel && typeof channel.name === "string" ? channel.name : undefined;
@@ -57,15 +63,63 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-async function initializeCodexClient(): Promise<void> {
-  try {
-    await codexClient.ensureStarted();
-    console.log("[startup] Codex app-server is ready.");
-  } catch (error) {
-    console.error(
-      `[startup] Codex app-server initialization failed: ${getErrorMessage(error)}. The bot will stay online and retry when the next message needs Codex.`,
-    );
+function formatStartupStatus(options: {
+  botTag: string;
+  phase: string;
+  sessionStoreLoaded: boolean;
+  codexReady: boolean;
+  codexDeferred: boolean;
+  error?: string;
+}): string {
+  const lines = [
+    "Startup status",
+    `- bot: ${options.botTag}`,
+    `- phase: ${options.phase}`,
+    `- session store: ${options.sessionStoreLoaded ? "ready" : "pending"}`,
+    `- codex app-server: ${options.codexReady ? "ready" : options.codexDeferred ? "deferred" : "pending"}`,
+    `- workspace: ${config.codexWorkspace}`,
+  ];
+
+  if (options.error) {
+    lines.push(`- error: ${options.error}`);
   }
+
+  return lines.join("\n");
+}
+
+async function createAdminStartupLogs(initialContent: string): Promise<AdminStartupLog[]> {
+  const adminIds = config.restartAdminUserIds;
+  if (adminIds.length === 0) {
+    return [];
+  }
+
+  const logs = await Promise.all(
+    adminIds.map(async (adminId) => {
+      try {
+        const user = await discordClient.users.fetch(adminId);
+        const dm = await user.createDM();
+        const message = await dm.send(initialContent);
+        return { adminId, message };
+      } catch (error) {
+        console.error(`[startup] Failed to send startup log to admin ${adminId}: ${getErrorMessage(error)}`);
+        return null;
+      }
+    }),
+  );
+
+  return logs.flatMap((entry) => (entry ? [entry] : []));
+}
+
+async function updateAdminStartupLogs(logs: AdminStartupLog[], content: string): Promise<void> {
+  await Promise.all(
+    logs.map(async ({ adminId, message }) => {
+      try {
+        await message.edit(content);
+      } catch (error) {
+        console.error(`[startup] Failed to edit startup log for admin ${adminId}: ${getErrorMessage(error)}`);
+      }
+    }),
+  );
 }
 
 function serializeConversation<T>(key: string, task: () => Promise<T>): Promise<T> {
@@ -99,6 +153,17 @@ async function sendToChannel(message: Message, content: string): Promise<void> {
   await message.channel.send(content);
 }
 
+async function sendImagesToChannel(message: Message, imagePaths: Array<{ resolvedPath: string; filename: string }>): Promise<void> {
+  if (!message.channel?.isSendable?.()) {
+    throw new Error("Message channel is not sendable");
+  }
+
+  for (const image of imagePaths) {
+    const attachment = new AttachmentBuilder(image.resolvedPath, { name: image.filename });
+    await message.channel.send({ files: [attachment] });
+  }
+}
+
 async function editMessageIfChanged(
   message: { edit: (content: string) => Promise<unknown> },
   content: string,
@@ -123,19 +188,6 @@ function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
   }
 
   return activeTools;
-}
-
-function recordReasoningEntry(entries: string[], entry: string): void {
-  const normalized = entry.trim();
-  if (!normalized) {
-    return;
-  }
-
-  if (entries[entries.length - 1] === normalized) {
-    return;
-  }
-
-  entries.push(normalized);
 }
 
 async function handleChatMessage(message: Message): Promise<void> {
@@ -191,13 +243,13 @@ async function handleChatMessage(message: Message): Promise<void> {
         isWriting: false,
         activeTools: [],
         usedTools: [],
-        reasoningEntries: [],
+        previewText: "",
       }),
     );
     const lastRendered = { value: "" };
     let lastUpdateAt = 0;
     const toolEvents: string[] = [];
-    const reasoningEntries: string[] = [];
+    let previewText = "";
     let isWriting = false;
     const activeToolCounts = new Map<string, number>();
 
@@ -214,7 +266,7 @@ async function handleChatMessage(message: Message): Promise<void> {
           isWriting,
           activeTools: formatActiveToolList(activeToolCounts),
           usedTools: toolEvents,
-          reasoningEntries,
+          previewText,
         }),
         lastRendered,
       );
@@ -227,9 +279,9 @@ async function handleChatMessage(message: Message): Promise<void> {
         cwd,
         sandboxPolicy,
         onDelta: async (fullText) => {
+          previewText = fullText.trim();
           if (!isWriting && fullText.trim()) {
             isWriting = true;
-            recordReasoningEntry(reasoningEntries, "Started drafting the final response.");
             await updatePlaceholder(true);
             return;
           }
@@ -237,11 +289,7 @@ async function handleChatMessage(message: Message): Promise<void> {
           await updatePlaceholder();
         },
         onPlan: async (planEvent) => {
-          const steps = (planEvent.plan ?? []).map((step) => `${step.status}: ${step.step}`).join("\n");
-          if (steps) {
-            for (const step of steps.split("\n")) {
-              recordReasoningEntry(reasoningEntries, step);
-            }
+          if ((planEvent.plan ?? []).length > 0) {
             await updatePlaceholder(true);
           }
         },
@@ -254,7 +302,6 @@ async function handleChatMessage(message: Message): Promise<void> {
           if (eventName === "item/started") {
             toolEvents.push(summary);
             activeToolCounts.set(summary, (activeToolCounts.get(summary) ?? 0) + 1);
-            recordReasoningEntry(reasoningEntries, `Started tool: ${summary}`);
           } else if (eventName === "item/completed") {
             const count = activeToolCounts.get(summary) ?? 0;
             if (count <= 1) {
@@ -262,7 +309,6 @@ async function handleChatMessage(message: Message): Promise<void> {
             } else {
               activeToolCounts.set(summary, count - 1);
             }
-            recordReasoningEntry(reasoningEntries, `Completed tool: ${summary}`);
           }
 
           void updatePlaceholder(true);
@@ -276,21 +322,34 @@ async function handleChatMessage(message: Message): Promise<void> {
           isWriting: false,
           activeTools: formatActiveToolList(activeToolCounts),
           usedTools: toolEvents,
-          reasoningEntries,
+          previewText,
         }),
         lastRendered,
       );
 
-      const finalText = result.text || "No assistant text returned.";
-      const chunks = splitDiscordMessage(finalText);
+      const finalText = result.text || "";
+      const { cleanText, imageReferences } = extractImageMarkers(finalText);
+      const { images, errors } = await resolveLocalImages(imageReferences, {
+        cwd,
+        allowedRoots: [cwd, config.codexWorkspace, "/tmp"],
+      });
+      const chunks = splitDiscordMessage(cleanText);
 
-      if (chunks.length === 0) {
+      if (chunks.length === 0 && images.length === 0) {
         await sendToChannel(message, "No assistant text returned.");
         return;
       }
 
       for (const chunk of chunks) {
         await sendToChannel(message, chunk);
+      }
+
+      if (images.length > 0) {
+        await sendImagesToChannel(message, images);
+      }
+
+      for (const error of errors) {
+        await sendToChannel(message, `image send skipped: ${error}`);
       }
     } catch (error) {
       await editMessageIfChanged(placeholder, "Reply failed.", lastRendered);
@@ -300,15 +359,82 @@ async function handleChatMessage(message: Message): Promise<void> {
 }
 
 discordClient.once("ready", async () => {
+  let adminLogs: AdminStartupLog[] = [];
   try {
-    await sessionStore.load();
     if (!discordClient.user) {
       throw new Error("Discord client user is unavailable after login");
     }
     console.log(`Discord bot logged in as ${discordClient.user.tag}`);
-    await initializeCodexClient();
+
+    const botTag = discordClient.user.tag;
+    adminLogs = await createAdminStartupLogs(
+      formatStartupStatus({
+        botTag,
+        phase: "discord ready",
+        sessionStoreLoaded: false,
+        codexReady: false,
+        codexDeferred: false,
+      }),
+    );
+
+    await sessionStore.load();
+    await updateAdminStartupLogs(
+      adminLogs,
+      formatStartupStatus({
+        botTag,
+        phase: "session store loaded",
+        sessionStoreLoaded: true,
+        codexReady: false,
+        codexDeferred: false,
+      }),
+    );
+
+    try {
+      await codexClient.ensureStarted();
+      console.log("[startup] Codex app-server is ready.");
+      await updateAdminStartupLogs(
+        adminLogs,
+        formatStartupStatus({
+          botTag,
+          phase: "startup complete",
+          sessionStoreLoaded: true,
+          codexReady: true,
+          codexDeferred: false,
+        }),
+      );
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      console.error(
+        `[startup] Codex app-server initialization failed: ${errorMessage}. The bot will stay online and retry when the next message needs Codex.`,
+      );
+      await updateAdminStartupLogs(
+        adminLogs,
+        formatStartupStatus({
+          botTag,
+          phase: "startup complete with deferred Codex initialization",
+          sessionStoreLoaded: true,
+          codexReady: false,
+          codexDeferred: true,
+          error: errorMessage,
+        }),
+      );
+    }
   } catch (error) {
-    console.error(`[startup] Ready handler failed: ${getErrorMessage(error)}`);
+    const errorMessage = getErrorMessage(error);
+    console.error(`[startup] Ready handler failed: ${errorMessage}`);
+    if (discordClient.user && adminLogs.length > 0) {
+      await updateAdminStartupLogs(
+        adminLogs,
+        formatStartupStatus({
+          botTag: discordClient.user.tag,
+          phase: "startup failed",
+          sessionStoreLoaded: false,
+          codexReady: false,
+          codexDeferred: false,
+          error: errorMessage,
+        }),
+      );
+    }
   }
 });
 
