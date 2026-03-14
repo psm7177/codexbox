@@ -2,12 +2,16 @@
 
 ## What It Does
 
-- Each guild text channel has its own persisted `cwd`
-- Each Discord thread has its own Codex session and inherits the parent channel `cwd`
-- DMs also keep their own `cwd`, defaulting to `CODEX_WORKSPACE`
-- Turns are serialized per Discord conversation so Codex session history stays coherent
-- In guild text channels, the bot responds when mentioned or replied to
-- In DMs, the bot always responds
+`codex-discord` is a bridge between Discord and Codex. Its purpose is to let a person use Codex from a Discord conversation instead of a local terminal window.
+
+This project is meant for teams or individuals who want to:
+
+- work with Codex from a familiar chat interface
+- keep ongoing task context inside a Discord channel, thread, or DM
+- use Codex for coding, file inspection, command execution, and image-related workflows without leaving Discord
+- run a self-hosted bot that stays connected to the local machine where Codex is installed
+
+In short, this project turns Discord into a practical front end for an existing Codex environment.
 
 ## Commands
 
