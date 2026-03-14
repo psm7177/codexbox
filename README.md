@@ -4,6 +4,8 @@ Discord bot that maps Discord conversations to Codex app-server threads.
 
 Documentation is split by audience, setup depth, and language.
 
+- [Release Notes](RELEASES.md)
+
 ## English
 
 - [User Manual](docs/en/user-manual.md)

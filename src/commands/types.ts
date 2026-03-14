@@ -1,4 +1,5 @@
 import type { Message } from "discord.js";
+import type { CodexAppServerClient } from "../codex-app-server-client.js";
 import type { Config } from "../config.js";
 import type { ErrorTracker } from "../error-tracker.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
@@ -15,6 +16,7 @@ export interface CommandContext {
   conversationService: ConversationService;
   restartCoordinator: RestartCoordinator;
   workspaceService: WorkspaceService;
+  codexClient: Pick<CodexAppServerClient, "request">;
   errorTracker: ErrorTracker;
   getConversationKey: (message: Message) => string;
   getWorkspaceKey: (message: Message) => string;

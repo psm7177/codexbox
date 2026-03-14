@@ -1,9 +1,9 @@
 import type { SessionRecord, SessionStore } from "../session-store.js";
 
 export class ConversationService {
-  private readonly store: Pick<SessionStore, "get" | "set" | "delete">;
+  private readonly store: Pick<SessionStore, "get" | "set" | "delete" | "entries">;
 
-  constructor(store: Pick<SessionStore, "get" | "set" | "delete">) {
+  constructor(store: Pick<SessionStore, "get" | "set" | "delete" | "entries">) {
     this.store = store;
   }
 
@@ -15,6 +15,13 @@ export class ConversationService {
     const session = { threadId };
     await this.store.set(conversationKey, session);
     return session;
+  }
+
+  listSessions(): Array<{ conversationKey: string; threadId: string }> {
+    return this.store.entries().map(([conversationKey, session]) => ({
+      conversationKey,
+      threadId: session.threadId,
+    }));
   }
 
   async reset(conversationKey: string): Promise<void> {

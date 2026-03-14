@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Config, SandboxMode } from "../config.js";
-import type { SessionStore } from "../session-store.js";
+import type { ReplyMode, SessionStore } from "../session-store.js";
 
 export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
   const relative = path.relative(rootPath, targetPath);
@@ -26,6 +26,9 @@ export class WorkspaceService {
     | "getWorkspaceSandboxMode"
     | "setWorkspaceSandboxMode"
     | "deleteWorkspaceSandboxMode"
+    | "getWorkspaceReplyMode"
+    | "setWorkspaceReplyMode"
+    | "deleteWorkspaceReplyMode"
   >;
   private readonly defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess">;
 
@@ -41,6 +44,9 @@ export class WorkspaceService {
       | "getWorkspaceSandboxMode"
       | "setWorkspaceSandboxMode"
       | "deleteWorkspaceSandboxMode"
+      | "getWorkspaceReplyMode"
+      | "setWorkspaceReplyMode"
+      | "deleteWorkspaceReplyMode"
     >,
     defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess">,
   ) {
@@ -93,5 +99,17 @@ export class WorkspaceService {
 
   async resetNetworkAccess(workspaceKey: string): Promise<void> {
     await this.store.deleteWorkspaceNetworkAccess(workspaceKey);
+  }
+
+  getReplyMode(workspaceKey: string): ReplyMode {
+    return this.store.getWorkspaceReplyMode(workspaceKey) ?? "mentionOnly";
+  }
+
+  async setReplyMode(workspaceKey: string, mode: ReplyMode): Promise<void> {
+    await this.store.setWorkspaceReplyMode(workspaceKey, mode);
+  }
+
+  async resetReplyMode(workspaceKey: string): Promise<void> {
+    await this.store.deleteWorkspaceReplyMode(workspaceKey);
   }
 }

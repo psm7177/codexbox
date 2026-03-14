@@ -44,6 +44,7 @@ const commandHandlers = createCommandHandlers({
   conversationService,
   restartCoordinator,
   workspaceService,
+  codexClient,
   errorTracker,
   getConversationKey,
   getWorkspaceKey,

@@ -34,7 +34,7 @@ test("runCodexTurn updates progress and sends the final text", async () => {
   await runCodexTurn({
     message: discord.message,
     threadId: "thread-1",
-    text: "Summarize this repository.",
+    inputs: [{ type: "text", text: "Summarize this repository." }],
     cwd: "/workspace/project",
     codexWorkspace: "/workspace/project",
     sandboxPolicy: {
@@ -90,7 +90,7 @@ test("runCodexTurn marks the placeholder as failed when the turn errors", async 
     runCodexTurn({
       message: discord.message,
       threadId: "thread-1",
-      text: "Summarize this repository.",
+      inputs: [{ type: "text", text: "Summarize this repository." }],
       cwd: "/workspace/project",
       codexWorkspace: "/workspace/project",
       sandboxPolicy: {

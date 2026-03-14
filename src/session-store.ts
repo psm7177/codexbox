@@ -6,11 +6,14 @@ export interface SessionRecord {
   threadId: string;
 }
 
+export type ReplyMode = "mentionOnly" | "auto";
+
 interface SessionStoreFile {
   sessions?: Record<string, SessionRecord>;
   workspaces?: Record<string, string>;
   workspaceNetworkAccess?: Record<string, boolean>;
   workspaceSandboxModes?: Record<string, SandboxMode>;
+  workspaceReplyModes?: Record<string, ReplyMode>;
 }
 
 export class SessionStore {
@@ -19,6 +22,7 @@ export class SessionStore {
   private workspaces: Record<string, string>;
   private workspaceNetworkAccess: Record<string, boolean>;
   private workspaceSandboxModes: Record<string, SandboxMode>;
+  private workspaceReplyModes: Record<string, ReplyMode>;
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -26,6 +30,7 @@ export class SessionStore {
     this.workspaces = {};
     this.workspaceNetworkAccess = {};
     this.workspaceSandboxModes = {};
+    this.workspaceReplyModes = {};
   }
 
   async load(): Promise<void> {
@@ -36,6 +41,7 @@ export class SessionStore {
       this.workspaces = parsed.workspaces ?? {};
       this.workspaceNetworkAccess = parsed.workspaceNetworkAccess ?? {};
       this.workspaceSandboxModes = parsed.workspaceSandboxModes ?? {};
+      this.workspaceReplyModes = parsed.workspaceReplyModes ?? {};
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "ENOENT") {
@@ -45,6 +51,7 @@ export class SessionStore {
       this.workspaces = {};
       this.workspaceNetworkAccess = {};
       this.workspaceSandboxModes = {};
+      this.workspaceReplyModes = {};
     }
   }
 
@@ -60,6 +67,10 @@ export class SessionStore {
   async delete(conversationKey: string): Promise<void> {
     delete this.sessions[conversationKey];
     await this.save();
+  }
+
+  entries(): Array<[string, SessionRecord]> {
+    return Object.entries(this.sessions);
   }
 
   getWorkspace(workspaceKey: string): string | null {
@@ -104,6 +115,20 @@ export class SessionStore {
     await this.save();
   }
 
+  getWorkspaceReplyMode(workspaceKey: string): ReplyMode | null {
+    return this.workspaceReplyModes[workspaceKey] ?? null;
+  }
+
+  async setWorkspaceReplyMode(workspaceKey: string, mode: ReplyMode): Promise<void> {
+    this.workspaceReplyModes[workspaceKey] = mode;
+    await this.save();
+  }
+
+  async deleteWorkspaceReplyMode(workspaceKey: string): Promise<void> {
+    delete this.workspaceReplyModes[workspaceKey];
+    await this.save();
+  }
+
   private async save(): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     await fs.writeFile(
@@ -114,6 +139,7 @@ export class SessionStore {
           workspaces: this.workspaces,
           workspaceNetworkAccess: this.workspaceNetworkAccess,
           workspaceSandboxModes: this.workspaceSandboxModes,
+          workspaceReplyModes: this.workspaceReplyModes,
         },
         null,
         2,

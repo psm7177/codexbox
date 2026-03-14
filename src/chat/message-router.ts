@@ -1,7 +1,8 @@
 import type { Message } from "discord.js";
 import { parseCommand } from "../commands.js";
+import { downloadDiscordAttachments, formatDownloadedAttachmentContext } from "../discord-attachments.js";
 import { buildSandboxPolicy, type Config } from "../config.js";
-import type { CodexAppServerClient } from "../codex-app-server-client.js";
+import type { CodexAppServerClient, CodexUserInput } from "../codex-app-server-client.js";
 import {
   buildCodexTurnInput,
   getConversationKey,
@@ -13,6 +14,7 @@ import {
   stripBotMention,
 } from "../discord-context.js";
 import type { ErrorTracker } from "../error-tracker.js";
+import { resolveLocalReferences } from "../local-references.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
@@ -98,7 +100,8 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
     }
 
     const rawText = stripBotMention(message.content, botUserId);
-    if (!rawText) {
+    const hasAttachments = message.attachments.size > 0;
+    if (!rawText && !hasAttachments) {
       if (!options.config.discordMessageContentIntent && message.inGuild()) {
         await message.reply(
           "Message content is unavailable for this bot in guild channels. Mention the bot with text, use DMs, or enable the Message Content intent and set `DISCORD_MESSAGE_CONTENT_INTENT=true`.",
@@ -137,6 +140,37 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       const sandboxMode = options.workspaceService.getSandboxMode(workspaceKey);
       const networkAccess = options.workspaceService.getNetworkAccess(workspaceKey);
       const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
+      const turnInput = await resolveLocalReferences(rawText, {
+        cwd,
+        allowedRoots: [cwd, options.config.codexWorkspace, "/tmp"],
+      });
+      const downloadedAttachments =
+        message.attachments.size > 0
+          ? await downloadDiscordAttachments(message.attachments.values())
+          : [];
+      const attachmentContext = formatDownloadedAttachmentContext(downloadedAttachments);
+      const userSections: string[] = [];
+      if (turnInput.text.trim()) {
+        userSections.push(turnInput.text.trim());
+      } else if (downloadedAttachments.length > 0) {
+        userSections.push("The user attached files without additional text. Inspect the downloaded attachments.");
+      }
+      if (attachmentContext.trim()) {
+        userSections.push(attachmentContext.trim());
+      }
+      const turnText = userSections.join("\n\n").trim() || "The user attached files without additional text.";
+      const inputs: CodexUserInput[] = [
+        {
+          type: "text",
+          text: buildCodexTurnInput(message, turnText),
+        },
+        ...downloadedAttachments
+          .filter((attachment) => attachment.kind === "image")
+          .map((attachment) => ({
+            type: "localImage" as const,
+            path: attachment.savedPath,
+          })),
+      ];
 
       let session = options.conversationService.getSession(conversationKey);
       try {
@@ -153,7 +187,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
         await runTurn({
           message,
           threadId,
-          text: buildCodexTurnInput(message, rawText),
+          inputs,
           cwd,
           codexWorkspace: options.config.codexWorkspace,
           sandboxPolicy,
@@ -168,7 +202,14 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
   return async (message: Message): Promise<void> => {
     try {
       const botUserId = options.getBotUserId();
-      if (!botUserId || !shouldHandleMessage(message, botUserId)) {
+      if (!botUserId) {
+        return;
+      }
+
+      const workspaceKey = getWorkspaceKey(message);
+      const replyMode = options.workspaceService.getReplyMode(workspaceKey);
+      const shouldHandle = shouldHandleMessage(message, botUserId) || replyMode === "auto";
+      if (!shouldHandle) {
         return;
       }
 

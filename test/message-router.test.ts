@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Message } from "discord.js";
 import { createCommandHandlers } from "../src/commands.js";
+import type { CodexUserInput } from "../src/codex-app-server-client.js";
 import type { Config } from "../src/config.js";
 import { getConversationKey, getWorkspaceKey } from "../src/discord-context.js";
 import { ErrorTracker } from "../src/error-tracker.js";
@@ -60,8 +61,15 @@ function createConfig(workspace: string): Config {
 }
 
 interface TestMessageOptions {
+  attachments?: Array<{
+    name: string | null;
+    url: string;
+    contentType?: string | null;
+    size?: number;
+  }>;
   content?: string;
   reply?: (content: string) => Promise<unknown>;
+  mentioned?: boolean;
   channel?: {
     id?: string;
     name?: string;
@@ -77,6 +85,7 @@ interface TestMessageOptions {
 
 function createMessage(options: TestMessageOptions = {}): Message {
   const reply = options?.reply ?? (async () => undefined);
+  const attachmentItems = options.attachments ?? [];
   const channel = {
     id: "channel-1",
     name: "general",
@@ -85,7 +94,7 @@ function createMessage(options: TestMessageOptions = {}): Message {
     isSendable: () => true,
     ...options.channel,
   };
-  const mentionsUsers = { has: () => true };
+  const mentionsUsers = { has: () => options.mentioned ?? true };
   const message = {
     content: "<@bot-1> hello",
     channelId: "channel-1",
@@ -102,6 +111,11 @@ function createMessage(options: TestMessageOptions = {}): Message {
       users: mentionsUsers,
       repliedUser: null,
     },
+    attachments: {
+      size: attachmentItems.length,
+      values: () => attachmentItems.values(),
+      [Symbol.iterator]: () => attachmentItems.values(),
+    },
     reference: null,
     inGuild: () => true,
     reply,
@@ -112,6 +126,67 @@ function createMessage(options: TestMessageOptions = {}): Message {
     ...(options.inGuild ? { inGuild: options.inGuild } : {}),
   };
   return message as unknown as Message;
+}
+
+function createCodexRequestStub() {
+  return async (method: string) => {
+    if (method === "config/read") {
+      return {
+        config: {
+          model: "gpt-test",
+          model_provider: "openai",
+        },
+      };
+    }
+
+    if (method === "thread/read") {
+      return {
+        thread: {
+          status: { type: "idle" },
+          model: "gpt-test",
+          modelProvider: "openai",
+        },
+      };
+    }
+
+    if (method === "account/read") {
+      return {
+        account: {
+          type: "chatgpt",
+          email: "user@example.com",
+          planType: "pro",
+        },
+        requiresOpenaiAuth: true,
+      };
+    }
+
+    if (method === "account/rateLimits/read") {
+      return {
+        rateLimits: {
+          limitId: "codex",
+          limitName: null,
+          primary: {
+            usedPercent: 25,
+            windowDurationMins: 15,
+            resetsAt: 1730947200,
+          },
+        },
+        rateLimitsByLimitId: {
+          codex: {
+            limitId: "codex",
+            limitName: null,
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 15,
+              resetsAt: 1730947200,
+            },
+          },
+        },
+      };
+    }
+
+    throw new Error(`Unexpected request: ${method}`);
+  };
 }
 
 test("message router routes commands to command handlers", async () => {
@@ -127,6 +202,9 @@ test("message router routes commands to command handlers", async () => {
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
@@ -170,18 +248,22 @@ test("message router routes commands to command handlers", async () => {
 
   assert.equal(ensureThreadCalled, false);
   assert.equal(runTurnCalled, false);
-  assert.equal(
-    replies[0],
-    "workspace: `" +
-      config.codexWorkspace +
-      "`\ncwd: `" +
-      config.codexWorkspace +
-      "`\naccess: `workspace-write`\nnetwork: `off`\nNo Codex session is mapped to this conversation yet.",
-  );
+  assert.match(replies[0] ?? "", new RegExp(`workspace: \`${config.codexWorkspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\``));
+  assert.match(replies[0] ?? "", /cwd: `.*`/);
+  assert.match(replies[0] ?? "", /model: `gpt-test`/);
+  assert.match(replies[0] ?? "", /provider: `openai`/);
+  assert.match(replies[0] ?? "", /auth mode: `chatgpt`/);
+  assert.match(replies[0] ?? "", /account: `user@example\.com`/);
+  assert.match(replies[0] ?? "", /plan: `pro`/);
+  assert.match(replies[0] ?? "", /openai auth required: `yes`/);
+  assert.match(replies[0] ?? "", /usage:/);
+  assert.match(replies[0] ?? "", /codex: `75% remaining`/);
+  assert.match(replies[0] ?? "", /No Codex session is mapped to this conversation yet\./);
 });
 
 test("message router resolves workspace and runs a Codex turn for chat messages", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  await fs.mkdir(path.join(workspace, "project"));
   const config = createConfig(workspace);
   const sessionStore = new SessionStore(config.sessionStorePath);
   await sessionStore.setWorkspace("channel:guild-1:channel-1", path.join(workspace, "project"));
@@ -194,11 +276,14 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
   });
-  const calls: Array<{ threadId: string; text: string; cwd: string }> = [];
+  const calls: Array<{ threadId: string; inputs: CodexUserInput[]; cwd: string }> = [];
   const handler = createMessageCreateHandler({
     config,
     conversationService,
@@ -218,7 +303,7 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
     runTurn: async (options) => {
       calls.push({
         threadId: options.threadId,
-        text: options.text,
+        inputs: options.inputs,
         cwd: options.cwd,
       });
     },
@@ -235,18 +320,221 @@ test("message router resolves workspace and runs a Codex turn for chat messages"
   assert.deepEqual(calls, [
     {
       threadId: "thread-123",
-      text:
-        "[Discord runtime context]\n" +
-        "channel_id: channel-1\n" +
-        "guild_id: guild-1\n" +
-        "conversation_kind: channel\n" +
-        "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.\n" +
-        "[/Discord runtime context]\n\n" +
-        "summarize this repo",
+      inputs: [
+        {
+          type: "text",
+          text:
+            "[Discord runtime context]\n" +
+            "channel_id: channel-1\n" +
+            "guild_id: guild-1\n" +
+            "conversation_kind: channel\n" +
+            "If the MCP tool `send_discord_image` is available and the user asks you to send an image or file into Discord, use that tool with the current channel_id instead of only mentioning the file path in text.\n" +
+            "[/Discord runtime context]\n\n" +
+            "summarize this repo",
+        },
+      ],
       cwd: path.join(workspace, "project"),
     },
   ]);
   assert.equal(sessionStore.get(getConversationKey(message))?.threadId, "thread-123");
+});
+
+test("message router expands local file references before starting a turn", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const projectDir = path.join(workspace, "project");
+  const notePath = path.join(projectDir, "auth-example.txt");
+  await fs.mkdir(projectDir);
+  await fs.writeFile(notePath, "token auth example\n", "utf8");
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspace("channel:guild-1:channel-1", projectDir);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const calls: Array<{ inputs: CodexUserInput[] }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      calls.push({ inputs: options.inputs });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> inspect [[local:auth-example.txt]]",
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.inputs[0]?.type, "text");
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /\[Local file: .*auth-example\.txt\]/);
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /token auth example/);
+});
+
+test("message router downloads Discord attachments into /tmp and injects text attachments", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const calls: Array<{ inputs: CodexUserInput[] }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      calls.push({ inputs: options.inputs });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+  const attachmentBody = "token auth example\n";
+  const attachmentUrl = `data:text/plain;base64,${Buffer.from(attachmentBody).toString("base64")}`;
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> analyze this file",
+      attachments: [
+        {
+          name: "auth-example.txt",
+          url: attachmentUrl,
+          contentType: "text/plain",
+          size: attachmentBody.length,
+        },
+      ],
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.inputs.length, 1);
+  assert.equal(calls[0]?.inputs[0]?.type, "text");
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /\[Downloaded Discord attachments\]/);
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /auth-example\.txt -> \/tmp\/codexbox-discord-/);
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /token auth example/);
+});
+
+test("message router accepts attachment-only messages and passes image attachments as localImage inputs", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const calls: Array<{ inputs: CodexUserInput[] }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      calls.push({ inputs: options.inputs });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+  const tinyPngBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W6iUAAAAASUVORK5CYII=";
+
+  await handler(
+    createMessage({
+      content: "<@bot-1>",
+      attachments: [
+        {
+          name: "pixel.png",
+          url: `data:image/png;base64,${tinyPngBase64}`,
+          contentType: "image/png",
+        },
+      ],
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.inputs[0]?.type, "text");
+  assert.match(
+    calls[0]?.inputs[0]?.text ?? "",
+    /The user attached files without additional text\. Inspect the downloaded attachments\./,
+  );
+  assert.equal(calls[0]?.inputs[1]?.type, "localImage");
+  assert.match((calls[0]?.inputs[1] as { path?: string })?.path ?? "", /^\/tmp\/codexbox-discord-/);
 });
 
 test("message router rejects new work while restart is pending", async () => {
@@ -263,6 +551,9 @@ test("message router rejects new work while restart is pending", async () => {
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
@@ -315,6 +606,9 @@ test("message router ignores unauthorized users when allowlists are configured",
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
@@ -371,6 +665,9 @@ test("message router returns an error reference and logs detail", async () => {
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
@@ -434,6 +731,9 @@ test("workspace command updates CODEX_WORKSPACE in the env file for admins", asy
     conversationService,
     restartCoordinator,
     workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
     errorTracker,
     getConversationKey,
     getWorkspaceKey,
@@ -475,4 +775,64 @@ test("workspace command updates CODEX_WORKSPACE in the env file for admins", asy
     replies[0],
     `Saved startup workspace as \`${nextWorkspace}\`.\nRestart required. Current runtime workspace remains \`${workspace}\` until the bot restarts.`,
   );
+});
+
+test("message router auto reply mode handles plain channel messages without mention", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceReplyMode("channel:guild-1:channel-1", "auto");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const calls: Array<{ threadId: string; inputs: CodexUserInput[] }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      calls.push({
+        threadId: options.threadId,
+        inputs: options.inputs,
+      });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "plain message without mention",
+      mentioned: false,
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.inputs[0]?.type, "text");
+  assert.match(calls[0]?.inputs[0]?.text ?? "", /plain message without mention$/);
 });

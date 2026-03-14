@@ -1,5 +1,5 @@
 import type { Message } from "discord.js";
-import type { CodexAppServerClient, ToolItem } from "../codex-app-server-client.js";
+import type { CodexAppServerClient, CodexUserInput, ToolItem } from "../codex-app-server-client.js";
 import type { Config } from "../config.js";
 import { editMessageIfChanged, sendImagesToChannel, sendToChannel } from "../discord/message-sender.js";
 import { resolveImageArtifacts } from "../discord-images.js";
@@ -22,7 +22,7 @@ function formatActiveToolList(activeToolCounts: Map<string, number>): string[] {
 export async function runCodexTurn(options: {
   message: Message;
   threadId: string;
-  text: string;
+  inputs: CodexUserInput[];
   cwd: string;
   codexWorkspace: string;
   sandboxPolicy: Config["turnDefaults"]["sandboxPolicy"];
@@ -65,7 +65,7 @@ export async function runCodexTurn(options: {
   try {
     const result = await options.codexClient.startTurn({
       threadId: options.threadId,
-      text: options.text,
+      inputs: options.inputs,
       cwd: options.cwd,
       sandboxPolicy: options.sandboxPolicy,
       onDelta: async (fullText) => {

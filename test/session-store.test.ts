@@ -60,3 +60,17 @@ test("session store persists workspace sandbox mode", async () => {
 
   assert.equal(reloaded.getWorkspaceSandboxMode("channel:guild:parent"), "dangerFullAccess");
 });
+
+test("session store persists workspace reply mode", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
+  const storePath = path.join(tempDir, "sessions.json");
+  const store = new SessionStore(storePath);
+
+  await store.load();
+  await store.setWorkspaceReplyMode("channel:guild:parent", "auto");
+
+  const reloaded = new SessionStore(storePath);
+  await reloaded.load();
+
+  assert.equal(reloaded.getWorkspaceReplyMode("channel:guild:parent"), "auto");
+});

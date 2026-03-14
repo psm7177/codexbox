@@ -14,13 +14,18 @@ interface Deferred<T> {
 
 interface PendingTurn {
   threadId: string;
-  text: string;
   deferred: Deferred<TurnResult>;
   imageArtifacts: ImageArtifact[];
   onDelta?: (fullText: string, delta: string) => Promise<void> | void;
   onPlan?: (planEvent: PlanEvent) => Promise<void> | void;
   onToolEvent?: (eventName: string, item: ToolItem) => void;
+  text: string;
 }
+
+export type CodexUserInput =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string }
+  | { type: "localImage"; path: string };
 
 export interface ToolItem {
   id?: string;
@@ -178,7 +183,7 @@ export class CodexAppServerClient extends EventEmitter {
 
   async startTurn({
     threadId,
-    text,
+    inputs,
     cwd,
     sandboxPolicy,
     onDelta,
@@ -186,7 +191,7 @@ export class CodexAppServerClient extends EventEmitter {
     onToolEvent,
   }: {
     threadId: string;
-    text: string;
+    inputs: CodexUserInput[];
     cwd?: string;
     sandboxPolicy?: Config["turnDefaults"]["sandboxPolicy"];
     onDelta?: PendingTurn["onDelta"];
@@ -199,7 +204,7 @@ export class CodexAppServerClient extends EventEmitter {
 
     const response = (await this.request("turn/start", {
       threadId,
-      input: [{ type: "text", text }],
+      input: inputs,
       cwd: resolvedCwd,
       model: this.config.turnDefaults.model,
       approvalPolicy: this.config.turnDefaults.approvalPolicy,
