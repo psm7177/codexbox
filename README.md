@@ -1,41 +1,85 @@
 # codex-discord
 
-Discord bot that treats each Discord conversation as a Codex app-server session.
+Discord bot that treats Discord channels as Codex workspaces and Discord conversations as Codex sessions.
 
 ## Behavior
 
-- One Codex thread is persisted per Discord DM, Discord thread, or guild text channel.
+- Each guild text channel owns one persisted `cwd`.
+- Each Discord thread owns one Codex session, and inherits the parent channel `cwd`.
+- Messages sent directly in a guild text channel use that channel's `cwd` and that channel's own Codex session.
+- DMs also keep their own `cwd`, defaulting to `CODEX_WORKSPACE`.
 - DMs are always handled.
-- Discord thread channels are always handled.
+- Discord thread channels work when the bot can read message content.
 - Regular guild text channels are handled when the bot is mentioned or replied to.
 - Turns are serialized per Discord conversation so the Codex session history stays coherent.
+- Commands are handled in `!codex <command>` form.
+- `!codex help` lists available commands.
+- `!codex status` shows the current `cwd` and mapped Codex thread id.
+- `!codex cwd` shows the current channel `cwd`.
+- `!codex cwd <path>` sets the current channel `cwd`.
+- `!codex cwd reset` resets the current channel `cwd` back to `CODEX_WORKSPACE`.
 - `!codex reset` drops the current Discord-to-Codex mapping for that conversation.
-- `!codex status` shows the mapped Codex thread id.
+- `!codex restart` exits the bot with code `75`, and the local runner started by `npm start` rebuilds and starts it again.
 
 ## Requirements
 
 - Node.js 20+
-- Rust toolchain with `cargo`
-- A working Codex auth/config setup for `codex app-server`
-- A Discord bot token with the `MESSAGE CONTENT INTENT` enabled
+- A preinstalled global `codex` CLI with `codex app-server`
+- A working Codex auth/config setup for that `codex` installation
+- A Discord bot token
+- Optional: `MESSAGE CONTENT INTENT` enabled if you want the bot to read non-mention guild messages
 
 ## Setup
 
-1. Install Node dependencies.
+1. Install Node dependencies with `npm install`.
 2. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`.
 3. Start the bot with `npm start`.
 
-By default the bot starts Codex from the vendored submodule by running:
+TypeScript sources live under `src/` and compile to `dist/`.
+
+Useful commands:
 
 ```bash
-node scripts/run-codex-app-server.js
+npm run build
+npm test
+npm start
 ```
 
-If you already have a built app-server binary, set:
+## Publishing Safety
+
+- Do not commit `.env`, `.data/`, or any generated session files.
+- Do not commit `dist/`; build artifacts are environment-specific and should be reproduced locally or in CI.
+- Review `CODEX_WORKSPACE` before publishing configs. It should usually be a relative path like `.` or a non-sensitive project path, not a personal absolute path.
+- Keep `CODEX_APPROVAL_POLICY=never` unless you intentionally want Discord users to trigger higher-risk actions.
+- Keep `CODEX_SANDBOX_MODE=workspaceWrite` or `readOnly` for public deployments unless you have a strong reason to allow broader access.
+
+If you want Discord-triggered restart, allow specific Discord user IDs:
 
 ```bash
-CODEX_APP_SERVER_BIN=/path/to/codex-app-server
-CODEX_APP_SERVER_ARGS="--listen stdio://"
+DISCORD_RESTART_ADMIN_USER_IDS=123456789012345678,234567890123456789
+```
+
+`!codex restart` only works for those users. If you launch with `npm start`, the included runner will rebuild and relaunch the bot automatically. External supervisors like `pm2` or `systemd` are still fine, but no longer required for basic restart support.
+
+If you enable the Discord privileged Message Content intent in the developer portal, also set:
+
+```bash
+DISCORD_MESSAGE_CONTENT_INTENT=true
+```
+
+Without that intent, the bot can still work in DMs and when directly mentioned in guild channels, but it cannot reliably read arbitrary guild/thread message text.
+
+By default the bot starts the globally installed Codex CLI:
+
+```bash
+codex app-server --listen stdio://
+```
+
+If your Codex binary is somewhere else, set:
+
+```bash
+CODEX_APP_SERVER_BIN=/path/to/codex
+CODEX_APP_SERVER_ARGS="app-server --listen stdio://"
 ```
 
 ## Safety
