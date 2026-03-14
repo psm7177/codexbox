@@ -35,6 +35,31 @@ Discord bot that treats Discord channels as Codex workspaces and Discord convers
 2. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`.
 3. Start the bot with `npm start`.
 
+## Quick Linux Setup
+
+If you publish this repo to GitHub, a Linux host can bootstrap it with:
+
+```bash
+git clone <your-repo-url>
+cd codex-discord
+bash scripts/setup-linux.sh
+```
+
+The script:
+
+- checks for `node`, `npm`, and `codex`
+- runs `npm install`
+- creates `.env` from `.env.example` if needed
+- prompts for `DISCORD_TOKEN`
+- sets `CODEX_WORKSPACE=.`
+- runs the first build
+
+After that, start the bot with:
+
+```bash
+npm start
+```
+
 TypeScript sources live under `src/` and compile to `dist/`.
 
 Useful commands:
