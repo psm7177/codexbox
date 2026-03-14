@@ -7,6 +7,8 @@ export function createHelpCommand(): CommandHandler {
         "Available commands:",
         "`!codex help`",
         "`!codex status`",
+        "`!codex workspace` (admin)",
+        "`!codex workspace <path|reset>` (admin)",
         "`!codex cwd`",
         "`!codex cwd <path>`",
         "`!codex cwd reset`",

@@ -1,9 +1,14 @@
+import { requireAdmin } from "./auth.js";
 import type { SandboxMode } from "../config.js";
 import { formatSandboxMode } from "./format.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 
 export function createAccessCommand(context: CommandContext): CommandHandler {
   return async (message, args) => {
+    if (!(await requireAdmin(context, message, "You are not allowed to change Codex access settings."))) {
+      return;
+    }
+
     const workspaceKey = context.getWorkspaceKey(message);
     const current = context.workspaceService.getSandboxMode(workspaceKey);
     if (args.length === 0) {

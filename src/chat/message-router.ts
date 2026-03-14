@@ -7,6 +7,7 @@ import {
   getConversationKey,
   getThreadDisplayName,
   getWorkspaceKey,
+  isAuthorizedMessage,
   shouldHandleMessage,
   splitDiscordMessage,
   stripBotMention,
@@ -168,6 +169,10 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
     try {
       const botUserId = options.getBotUserId();
       if (!botUserId || !shouldHandleMessage(message, botUserId)) {
+        return;
+      }
+
+      if (!isAuthorizedMessage(message, options.config)) {
         return;
       }
 

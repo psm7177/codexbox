@@ -19,8 +19,12 @@ function createConfig(workspace: string): Config {
     discordToken: "token",
     discordClientId: "client-id",
     discordMessageContentIntent: false,
+    discordAllowedUserIds: [],
+    discordAllowedGuildIds: [],
+    discordAllowedChannelIds: [],
     restartAdminUserIds: [],
     codexWorkspace: workspace,
+    envFilePath: path.join(workspace, ".env"),
     sandboxMode: "workspaceWrite",
     sandboxNetworkAccess: false,
     sessionStorePath: path.join(workspace, ".data", "sessions.json"),
@@ -168,7 +172,9 @@ test("message router routes commands to command handlers", async () => {
   assert.equal(runTurnCalled, false);
   assert.equal(
     replies[0],
-    "cwd: `" +
+    "workspace: `" +
+      config.codexWorkspace +
+      "`\ncwd: `" +
       config.codexWorkspace +
       "`\naccess: `workspace-write`\nnetwork: `off`\nNo Codex session is mapped to this conversation yet.",
   );
@@ -295,6 +301,63 @@ test("message router rejects new work while restart is pending", async () => {
   assert.deepEqual(replies, ["Restart requested. Not accepting new requests until shutdown completes."]);
 });
 
+test("message router ignores unauthorized users when allowlists are configured", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  config.discordAllowedUserIds = ["trusted-user"];
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  let runTurnCalled = false;
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {
+      runTurnCalled = true;
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> summarize this repo",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(runTurnCalled, false);
+  assert.deepEqual(replies, []);
+});
+
 test("message router returns an error reference and logs detail", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
   const config = createConfig(workspace);
@@ -352,4 +415,64 @@ test("message router returns an error reference and logs detail", async () => {
   assert.equal(errorLogs.length, 1);
   assert.match(errorLogs[0] ?? "", /\[discord\]\[err-/);
   assert.match(errorLogs[0] ?? "", /x{50}/);
+});
+
+test("workspace command updates CODEX_WORKSPACE in the env file for admins", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const nextWorkspace = path.join(workspace, "next");
+  await fs.mkdir(nextWorkspace);
+  const config = createConfig(workspace);
+  config.restartAdminUserIds = ["user-1"];
+  await fs.writeFile(config.envFilePath, "DISCORD_TOKEN=test\nCODEX_WORKSPACE=.\n", "utf8");
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for commands");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for commands");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex workspace ${path.basename(nextWorkspace)}`,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  const envContent = await fs.readFile(config.envFilePath, "utf8");
+  assert.match(envContent, new RegExp(`^CODEX_WORKSPACE=${path.basename(nextWorkspace)}$`, "m"));
+  assert.equal(
+    replies[0],
+    `Saved startup workspace as \`${nextWorkspace}\`.\nRestart required. Current runtime workspace remains \`${workspace}\` until the bot restarts.`,
+  );
 });

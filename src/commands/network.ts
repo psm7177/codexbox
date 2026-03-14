@@ -1,8 +1,13 @@
+import { requireAdmin } from "./auth.js";
 import { formatNetworkAccess } from "./format.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 
 export function createNetworkCommand(context: CommandContext): CommandHandler {
   return async (message, args) => {
+    if (!(await requireAdmin(context, message, "You are not allowed to change network access."))) {
+      return;
+    }
+
     const workspaceKey = context.getWorkspaceKey(message);
     const current = context.workspaceService.getNetworkAccess(workspaceKey);
     if (args.length === 0) {

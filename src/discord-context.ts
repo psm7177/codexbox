@@ -1,4 +1,5 @@
 import type { Message } from "discord.js";
+import type { Config } from "./config.js";
 
 function getChannelName(message: Message): string | undefined {
   const channel = message.channel;
@@ -56,6 +57,42 @@ export function shouldHandleMessage(message: Message, clientUserId: string): boo
   }
 
   if (message.reference?.messageId && message.mentions.repliedUser?.id === clientUserId) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isAdminUser(config: Pick<Config, "restartAdminUserIds">, userId: string): boolean {
+  return config.restartAdminUserIds.includes(userId);
+}
+
+export function isAuthorizedMessage(
+  message: Message,
+  config: Pick<Config, "discordAllowedUserIds" | "discordAllowedGuildIds" | "discordAllowedChannelIds" | "restartAdminUserIds">,
+): boolean {
+  if (isAdminUser(config, message.author.id)) {
+    return true;
+  }
+
+  const hasAllowlist =
+    config.discordAllowedUserIds.length > 0 ||
+    config.discordAllowedGuildIds.length > 0 ||
+    config.discordAllowedChannelIds.length > 0;
+
+  if (!hasAllowlist) {
+    return true;
+  }
+
+  if (config.discordAllowedUserIds.includes(message.author.id)) {
+    return true;
+  }
+
+  if (config.discordAllowedChannelIds.includes(message.channelId)) {
+    return true;
+  }
+
+  if (message.guildId && config.discordAllowedGuildIds.includes(message.guildId)) {
     return true;
   }
 

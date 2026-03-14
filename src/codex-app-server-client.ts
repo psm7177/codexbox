@@ -4,7 +4,7 @@ import {
   JsonRpcRequestError,
   type JsonRpcServerRequest,
 } from "./codex/jsonrpc-transport.js";
-import type { Config } from "./config.js";
+import { buildAppServerEnv, type Config } from "./config.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -103,7 +103,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.transport = new JsonRpcChildProcessTransport({
       command: this.config.appServerCommand,
       cwd: process.cwd(),
-      env: process.env,
+      env: buildAppServerEnv(process.env),
       onLog: (line) => this.emit("log", line),
       onExit: (error) => {
         this.readyPromise = null;

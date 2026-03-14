@@ -1,10 +1,10 @@
 import { splitDiscordMessage } from "../discord-context.js";
+import { requireAdmin } from "./auth.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 
 export function createErrorCommand(context: CommandContext): CommandHandler {
   return async (message, args) => {
-    if (!context.config.restartAdminUserIds.includes(message.author.id)) {
-      await message.reply("You are not allowed to view bot error logs.");
+    if (!(await requireAdmin(context, message, "You are not allowed to view bot error logs."))) {
       return;
     }
 

@@ -1,5 +1,18 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { Config, SandboxMode } from "../config.js";
 import type { SessionStore } from "../session-store.js";
+
+export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function normalizeCwd(baseWorkspace: string, cwd: string): string {
+  const workspaceRoot = path.resolve(baseWorkspace);
+  const resolvedPath = path.resolve(cwd);
+  return isPathWithinRoot(resolvedPath, workspaceRoot) ? resolvedPath : workspaceRoot;
+}
 
 export class WorkspaceService {
   private readonly store: Pick<
@@ -36,11 +49,22 @@ export class WorkspaceService {
   }
 
   getCwd(workspaceKey: string): string {
-    return this.store.getWorkspace(workspaceKey) ?? this.defaults.codexWorkspace;
+    const stored = this.store.getWorkspace(workspaceKey);
+    return normalizeCwd(this.defaults.codexWorkspace, stored ?? this.defaults.codexWorkspace);
   }
 
   async setCwd(workspaceKey: string, cwd: string): Promise<void> {
-    await this.store.setWorkspace(workspaceKey, cwd);
+    const normalized = normalizeCwd(this.defaults.codexWorkspace, cwd);
+    if (normalized !== path.resolve(cwd)) {
+      throw new Error(`cwd must stay within \`${this.defaults.codexWorkspace}\``);
+    }
+
+    const stats = await fs.stat(normalized);
+    if (!stats.isDirectory()) {
+      throw new Error(`cwd is not a directory: \`${normalized}\``);
+    }
+
+    await this.store.setWorkspace(workspaceKey, normalized);
   }
 
   async resetCwd(workspaceKey: string): Promise<void> {

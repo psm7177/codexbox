@@ -4,6 +4,8 @@ import {
   buildCodexTurnInput,
   getConversationKey,
   getWorkspaceKey,
+  isAdminUser,
+  isAuthorizedMessage,
   splitDiscordMessage,
   stripBotMention,
 } from "../src/discord-context.js";
@@ -53,4 +55,71 @@ test("buildCodexTurnInput includes current Discord runtime context", () => {
   assert.match(input, /conversation_kind: channel/);
   assert.match(input, /send_discord_image/);
   assert.match(input, /send the chart$/);
+});
+
+test("isAuthorizedMessage allows admin users regardless of allowlists", () => {
+  const message = {
+    author: { id: "admin-1" },
+    channelId: "channel-1",
+    guildId: "guild-1",
+  };
+
+  assert.equal(
+    isAuthorizedMessage(message as never, {
+      discordAllowedUserIds: [],
+      discordAllowedGuildIds: [],
+      discordAllowedChannelIds: [],
+      restartAdminUserIds: ["admin-1"],
+    }),
+    true,
+  );
+  assert.equal(isAdminUser({ restartAdminUserIds: ["admin-1"] }, "admin-1"), true);
+});
+
+test("isAuthorizedMessage enforces configured allowlists", () => {
+  const baseMessage = {
+    author: { id: "user-1" },
+    channelId: "channel-1",
+    guildId: "guild-1",
+  };
+
+  assert.equal(
+    isAuthorizedMessage(baseMessage as never, {
+      discordAllowedUserIds: ["user-1"],
+      discordAllowedGuildIds: [],
+      discordAllowedChannelIds: [],
+      restartAdminUserIds: [],
+    }),
+    true,
+  );
+
+  assert.equal(
+    isAuthorizedMessage(baseMessage as never, {
+      discordAllowedUserIds: [],
+      discordAllowedGuildIds: ["guild-1"],
+      discordAllowedChannelIds: [],
+      restartAdminUserIds: [],
+    }),
+    true,
+  );
+
+  assert.equal(
+    isAuthorizedMessage(baseMessage as never, {
+      discordAllowedUserIds: [],
+      discordAllowedGuildIds: [],
+      discordAllowedChannelIds: ["channel-1"],
+      restartAdminUserIds: [],
+    }),
+    true,
+  );
+
+  assert.equal(
+    isAuthorizedMessage(baseMessage as never, {
+      discordAllowedUserIds: ["someone-else"],
+      discordAllowedGuildIds: [],
+      discordAllowedChannelIds: [],
+      restartAdminUserIds: [],
+    }),
+    false,
+  );
 });

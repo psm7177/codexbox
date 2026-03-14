@@ -6,18 +6,19 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
     const conversationKey = context.getConversationKey(message);
     const workspaceKey = context.getWorkspaceKey(message);
     const session = context.conversationService.getSession(conversationKey);
+    const workspaceRoot = context.config.codexWorkspace;
     const cwd = context.workspaceService.getCwd(workspaceKey);
     const sandboxMode = context.workspaceService.getSandboxMode(workspaceKey);
     const networkAccess = context.workspaceService.getNetworkAccess(workspaceKey);
     if (!session) {
       await message.reply(
-        `cwd: \`${cwd}\`\naccess: \`${formatSandboxMode(sandboxMode)}\`\nnetwork: \`${formatNetworkAccess(networkAccess)}\`\nNo Codex session is mapped to this conversation yet.`,
+        `workspace: \`${workspaceRoot}\`\ncwd: \`${cwd}\`\naccess: \`${formatSandboxMode(sandboxMode)}\`\nnetwork: \`${formatNetworkAccess(networkAccess)}\`\nNo Codex session is mapped to this conversation yet.`,
       );
       return;
     }
 
     await message.reply(
-      `cwd: \`${cwd}\`\naccess: \`${formatSandboxMode(sandboxMode)}\`\nnetwork: \`${formatNetworkAccess(networkAccess)}\`\nMapped to Codex thread \`${session.threadId}\`.`,
+      `workspace: \`${workspaceRoot}\`\ncwd: \`${cwd}\`\naccess: \`${formatSandboxMode(sandboxMode)}\`\nnetwork: \`${formatNetworkAccess(networkAccess)}\`\nMapped to Codex thread \`${session.threadId}\`.`,
     );
   };
 }

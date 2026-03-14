@@ -1,9 +1,9 @@
 import type { CommandContext, CommandHandler } from "./types.js";
+import { requireAdmin } from "./auth.js";
 
 export function createRestartCommand(context: CommandContext): CommandHandler {
   return async (message) => {
-    if (!context.config.restartAdminUserIds.includes(message.author.id)) {
-      await message.reply("You are not allowed to restart this bot.");
+    if (!(await requireAdmin(context, message, "You are not allowed to restart this bot."))) {
       return;
     }
 

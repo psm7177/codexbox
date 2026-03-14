@@ -6,6 +6,7 @@ import { createNetworkCommand } from "./commands/network.js";
 import { createResetCommand } from "./commands/reset.js";
 import { createRestartCommand } from "./commands/restart.js";
 import { createStatusCommand } from "./commands/status.js";
+import { createWorkspaceCommand } from "./commands/workspace.js";
 import type { CommandContext, CommandHandler, ParsedCommand } from "./commands/types.js";
 
 export function parseCommand(text: string): ParsedCommand | null {
@@ -25,6 +26,7 @@ export function createCommandHandlers(context: CommandContext): Record<string, C
   return {
     help: createHelpCommand(),
     status: createStatusCommand(context),
+    workspace: createWorkspaceCommand(context),
     cwd: createCwdCommand(context),
     access: createAccessCommand(context),
     network: createNetworkCommand(context),

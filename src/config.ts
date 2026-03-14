@@ -46,8 +46,12 @@ export interface Config {
   discordToken: string;
   discordClientId: string;
   discordMessageContentIntent: boolean;
+  discordAllowedUserIds: string[];
+  discordAllowedGuildIds: string[];
+  discordAllowedChannelIds: string[];
   restartAdminUserIds: string[];
   codexWorkspace: string;
+  envFilePath: string;
   sandboxMode: SandboxMode;
   sandboxNetworkAccess: boolean;
   sessionStorePath: string;
@@ -56,6 +60,33 @@ export interface Config {
   threadDefaults: ThreadDefaults;
   turnDefaults: TurnDefaults;
 }
+
+const APP_SERVER_ENV_KEYS = new Set([
+  "HOME",
+  "PATH",
+  "SHELL",
+  "USER",
+  "LOGNAME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "COLORTERM",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "SSH_AUTH_SOCK",
+  "GIT_SSH_COMMAND",
+  "DISPLAY",
+  "EDITOR",
+  "VISUAL",
+  "CI",
+  "NVM_DIR",
+  "NPM_CONFIG_PREFIX",
+  "npm_config_cache",
+]);
+
+const APP_SERVER_ENV_PREFIXES = ["CODEX_", "OPENAI_", "ANTHROPIC_", "AZURE_", "AWS_", "GOOGLE_", "GEMINI_", "OLLAMA_", "XDG_"];
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value == null || value === "") {
@@ -80,6 +111,13 @@ function splitArgs(value: string | undefined): string[] {
   return value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
 }
 
+function splitCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 export function buildSandboxPolicy(mode: SandboxMode, networkAccess: boolean, workspace: string): SandboxPolicy {
   if (mode === "dangerFullAccess") {
     return { type: "dangerFullAccess" };
@@ -101,9 +139,26 @@ export function buildSandboxPolicy(mode: SandboxMode, networkAccess: boolean, wo
   };
 }
 
+export function buildAppServerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+
+  for (const [key, value] of Object.entries(env)) {
+    if (value == null || value === "") {
+      continue;
+    }
+
+    if (APP_SERVER_ENV_KEYS.has(key) || APP_SERVER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 export function loadConfig(): Config {
   const rootDir = process.cwd();
   const codexWorkspace = path.resolve(process.env.CODEX_WORKSPACE ?? rootDir);
+  const envFilePath = path.resolve(rootDir, ".env");
   const sandboxMode = (process.env.CODEX_SANDBOX_MODE ?? "workspaceWrite") as SandboxMode;
   const sandboxNetworkAccess = parseBoolean(process.env.CODEX_SANDBOX_NETWORK, false);
   const sessionStorePath = path.resolve(process.env.SESSION_STORE_PATH ?? ".data/sessions.json");
@@ -112,17 +167,21 @@ export function loadConfig(): Config {
     process.env.CODEX_APP_SERVER_ARGS && process.env.CODEX_APP_SERVER_ARGS.trim() !== ""
       ? splitArgs(process.env.CODEX_APP_SERVER_ARGS)
       : ["app-server", "--listen", "stdio://"];
-  const restartAdminUserIds = (process.env.DISCORD_RESTART_ADMIN_USER_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const restartAdminUserIds = splitCsv(process.env.DISCORD_RESTART_ADMIN_USER_IDS);
+  const discordAllowedUserIds = splitCsv(process.env.DISCORD_ALLOWED_USER_IDS);
+  const discordAllowedGuildIds = splitCsv(process.env.DISCORD_ALLOWED_GUILD_IDS);
+  const discordAllowedChannelIds = splitCsv(process.env.DISCORD_ALLOWED_CHANNEL_IDS);
 
   return {
     discordToken: process.env.DISCORD_TOKEN ?? "",
     discordClientId: process.env.DISCORD_CLIENT_ID ?? "",
     discordMessageContentIntent: parseBoolean(process.env.DISCORD_MESSAGE_CONTENT_INTENT, false),
+    discordAllowedUserIds,
+    discordAllowedGuildIds,
+    discordAllowedChannelIds,
     restartAdminUserIds,
     codexWorkspace,
+    envFilePath,
     sandboxMode,
     sandboxNetworkAccess,
     sessionStorePath,
