@@ -33,6 +33,14 @@ INSTALL_CODEX_DISCORD_MCP=0 bash scripts/setup-linux.sh
 DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
 ```
 
+## Enable DOI PDF Downloads via Unpaywall
+
+Set an email address before starting the bot if you want `download_open_access_pdf` to fetch OA PDFs from Unpaywall.
+
+```bash
+UNPAYWALL_EMAIL=you@example.com npm start
+```
+
 ## Force systemd Scope
 
 ```bash

@@ -16,9 +16,11 @@ import {
 import type { ErrorTracker } from "../error-tracker.js";
 import { resolveLocalReferences } from "../local-references.js";
 import { ActiveTurnRegistry, type ActiveTurnRegistry as ActiveTurnRegistryType } from "../lifecycle/active-turn-registry.js";
+import { ConversationLockManager } from "../lifecycle/conversation-lock-manager.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
+import { getDynamicToolProfile } from "../dynamic-tools.js";
 import { runCodexTurn } from "./turn-runner.js";
 
 type CommandHandler = (message: Message, args: string[]) => Promise<void>;
@@ -28,6 +30,7 @@ interface MessageRouterOptions {
   conversationService: ConversationService;
   restartCoordinator: RestartCoordinator;
   activeTurnRegistry?: ActiveTurnRegistryType;
+  conversationLockManager?: ConversationLockManager;
   workspaceService: WorkspaceService;
   codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn"> &
     Partial<Pick<CodexAppServerClient, "interruptTurn">>;
@@ -51,6 +54,21 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function getRateLimitHint(error: unknown, workspaceService: WorkspaceService, workspaceKey: string): string {
+  const message = getErrorMessage(error);
+  if (!/429 Too Many Requests/i.test(message)) {
+    return "";
+  }
+
+  const provider = workspaceService.getModelProvider(workspaceKey);
+  const model = workspaceService.getModel(workspaceKey);
+  if (provider !== "ollama" || !model || !/cloud/i.test(model)) {
+    return "";
+  }
+
+  return `\nHint: selected model \`${model}\` is cloud-backed, so it can still hit Ollama Cloud rate limits. Use \`!codex model\` to switch to a local Ollama model.`;
+}
+
 function describeMessageSource(message: Message): string {
   if (!message.inGuild()) {
     return `dm:${message.author.username}`;
@@ -61,29 +79,8 @@ function describeMessageSource(message: Message): string {
   return `channel:${message.guild?.name ?? "unknown"}/#${getChannelName(message) ?? message.channelId}`;
 }
 
-function createConversationSerializer(): <T>(key: string, task: () => Promise<T>) => Promise<T> {
-  const conversationLocks = new Map<string, Promise<unknown>>();
-
-  return async function serializeConversation<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = conversationLocks.get(key) ?? Promise.resolve();
-    const current = previous.catch(() => {}).then(task);
-    void current
-      .finally(() => {
-        if (conversationLocks.get(key) === current) {
-          conversationLocks.delete(key);
-        }
-      })
-      .catch(() => {});
-    conversationLocks.set(
-      key,
-      current,
-    );
-    return current;
-  };
-}
-
 export function createMessageCreateHandler(options: MessageRouterOptions): (message: Message) => Promise<void> {
-  const serializeConversation = createConversationSerializer();
+  const conversationLockManager = options.conversationLockManager ?? new ConversationLockManager();
   const runTurn = options.runTurn ?? runCodexTurn;
   const activeTurnRegistry = options.activeTurnRegistry ?? new ActiveTurnRegistry();
   const log = options.log ?? console.log;
@@ -134,13 +131,15 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
     const conversationKey = getConversationKey(message);
     const workspaceKey = getWorkspaceKey(message);
-    await serializeConversation(conversationKey, async () => {
+    await conversationLockManager.serialize(conversationKey, async () => {
       if (!options.restartCoordinator.beginTurn()) {
         await message.reply(restartReply);
         return;
       }
 
       const cwd = options.workspaceService.getCwd(workspaceKey);
+      const model = options.workspaceService.getModel(workspaceKey);
+      const modelProvider = options.workspaceService.getModelProvider(workspaceKey);
       const sandboxMode = options.workspaceService.getSandboxMode(workspaceKey);
       const networkAccess = options.workspaceService.getNetworkAccess(workspaceKey);
       const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
@@ -178,14 +177,25 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
       let session = options.conversationService.getSession(conversationKey);
       try {
+        const requiredThreadToolProfile = getDynamicToolProfile(modelProvider);
+        const reusableThreadId =
+          (session?.threadToolProfile ?? null) === requiredThreadToolProfile ? session?.threadId : undefined;
         const threadId = await options.codexClient.ensureThread({
-          threadId: session?.threadId,
+          threadId: reusableThreadId,
           name: getThreadDisplayName(message),
           cwd,
+          model,
+          modelProvider,
         });
 
-        if (!session || session.threadId !== threadId) {
-          session = await options.conversationService.saveThread(conversationKey, threadId);
+        if (
+          !session ||
+          session.threadId !== threadId ||
+          (session.threadToolProfile ?? null) !== requiredThreadToolProfile
+        ) {
+          session = await options.conversationService.saveThread(conversationKey, threadId, {
+            threadToolProfile: requiredThreadToolProfile,
+          });
         }
 
         await runTurn({
@@ -194,6 +204,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
           threadId,
           inputs,
           cwd,
+          model,
           codexWorkspace: options.config.codexWorkspace,
           sandboxPolicy,
           codexClient: options.codexClient,
@@ -231,7 +242,9 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       errorLog(`[discord][${record.id}] ${record.detail}`);
       if (message.channel?.isSendable?.()) {
         const isAdmin = options.config.restartAdminUserIds.includes(message.author.id);
-        await message.reply(formatBridgeErrorReply(record.id, record.summary, isAdmin));
+        const workspaceKey = getWorkspaceKey(message);
+        const summary = `${record.summary}${getRateLimitHint(error, options.workspaceService, workspaceKey)}`;
+        await message.reply(formatBridgeErrorReply(record.id, summary, isAdmin));
       }
     }
   };

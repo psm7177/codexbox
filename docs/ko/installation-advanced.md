@@ -33,6 +33,14 @@ INSTALL_CODEX_DISCORD_MCP=0 bash scripts/setup-linux.sh
 DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
 ```
 
+## Unpaywall로 DOI PDF 다운로드 활성화
+
+`download_open_access_pdf`로 OA PDF를 내려받으려면 봇 시작 전에 이메일 주소를 설정하세요.
+
+```bash
+UNPAYWALL_EMAIL=you@example.com npm start
+```
+
 ## systemd scope 강제
 
 ```bash

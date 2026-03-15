@@ -12,6 +12,14 @@ export interface StartupStatus {
   codexReady: boolean;
   codexDeferred: boolean;
   workspace: string;
+  workflowCount?: number;
+  dueWorkflowCount?: number;
+  workflowRunnerState?: string;
+  workflowThreadPolicy?: string;
+  workflowActivitySummary?: string[];
+  workflowOperationalSummary?: string;
+  workflowHotspotSummary?: string;
+  workflowProviderSummary?: string;
   error?: string;
 }
 
@@ -23,7 +31,29 @@ export function formatStartupStatus(options: StartupStatus): string {
     `- session store: ${options.sessionStoreLoaded ? "ready" : "pending"}`,
     `- codex app-server: ${options.codexReady ? "ready" : options.codexDeferred ? "deferred" : "pending"}`,
     `- workspace: ${options.workspace}`,
+    `- workflows: ${options.workflowCount ?? 0} total, ${options.dueWorkflowCount ?? 0} due`,
+    `- workflow runner: ${options.workflowRunnerState ?? "unknown"}`,
+    `- workflow thread policy: ${options.workflowThreadPolicy ?? "unknown"}`,
   ];
+
+  if (options.workflowActivitySummary && options.workflowActivitySummary.length > 0) {
+    lines.push("- workflow activity:");
+    for (const line of options.workflowActivitySummary) {
+      lines.push(`  ${line}`);
+    }
+  }
+
+  if (options.workflowOperationalSummary) {
+    lines.push(`- workflow ops: ${options.workflowOperationalSummary}`);
+  }
+
+  if (options.workflowProviderSummary) {
+    lines.push(`- workflow providers: ${options.workflowProviderSummary}`);
+  }
+
+  if (options.workflowHotspotSummary) {
+    lines.push(`- workflow hotspots: ${options.workflowHotspotSummary}`);
+  }
 
   if (options.error) {
     lines.push(`- error: ${options.error}`);

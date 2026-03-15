@@ -26,6 +26,7 @@ export async function runCodexTurn(options: {
   threadId: string;
   inputs: CodexUserInput[];
   cwd: string;
+  model?: string;
   codexWorkspace: string;
   sandboxPolicy: Config["turnDefaults"]["sandboxPolicy"];
   codexClient: Pick<CodexAppServerClient, "startTurn"> & Partial<Pick<CodexAppServerClient, "interruptTurn">>;
@@ -74,6 +75,7 @@ export async function runCodexTurn(options: {
       threadId: options.threadId,
       inputs: options.inputs,
       cwd: options.cwd,
+      model: options.model,
       sandboxPolicy: options.sandboxPolicy,
       onStarted: async (turnId) => {
         const state = activeTurnRegistry.attachTurnId(conversationKey, turnId);

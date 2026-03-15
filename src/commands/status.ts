@@ -1,5 +1,6 @@
 import type { CommandContext, CommandHandler } from "./types.js";
 import { formatNetworkAccess, formatSandboxMode } from "./format.js";
+import { getDynamicToolProfile, getDynamicToolsForProvider, getDynamicToolsForToolProfile } from "../dynamic-tools.js";
 
 interface AccountReadResponse {
   account?: {
@@ -62,6 +63,26 @@ function formatUsageLines(rateLimits: RateLimitsReadResponse | null): string[] {
   return lines;
 }
 
+function formatWorkflowActivityLine(label: string, summary: { eventCount: number; counts: Record<string, number> }): string {
+  if (summary.eventCount === 0) {
+    return `workflow activity ${label}: \`none\``;
+  }
+
+  const failed = (summary.counts.failed ?? 0) + (summary.counts.terminal_failed ?? 0);
+  return `workflow activity ${label}: \`${summary.eventCount} events, completed=${summary.counts.completed ?? 0}, failed=${failed}, retried=${summary.counts.retried ?? 0}\``;
+}
+
+function formatCompactCounts(counts: Record<string, number>, preferredOrder: string[]): string {
+  return preferredOrder.map((key) => `${key}=${counts[key] ?? 0}`).join(", ");
+}
+
+function formatTopPairs(entries: Array<{ label: string; count: number }>): string {
+  if (entries.length === 0) {
+    return "none";
+  }
+  return entries.map((entry) => `${entry.label}=${entry.count}`).join(", ");
+}
+
 export function createStatusCommand(context: CommandContext): CommandHandler {
   return async (message) => {
     const conversationKey = context.getConversationKey(message);
@@ -69,12 +90,22 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
     const session = context.conversationService.getSession(conversationKey);
     const workspaceRoot = context.config.codexWorkspace;
     const cwd = context.workspaceService.getCwd(workspaceKey);
+    const modelOverride = context.workspaceService.getModelOverride(workspaceKey);
+    const providerOverride = context.workspaceService.getModelProviderOverride(workspaceKey);
     const sandboxMode = context.workspaceService.getSandboxMode(workspaceKey);
     const networkAccess = context.workspaceService.getNetworkAccess(workspaceKey);
     const replyMode = context.workspaceService.getReplyMode(workspaceKey) === "auto" ? "auto" : "mention";
 
-    let model = context.config.threadDefaults.model ?? "default";
-    let modelProvider = context.config.threadDefaults.modelProvider ?? "default";
+    const selectedModel = context.workspaceService.getModel(workspaceKey) ?? "default";
+    const selectedProvider = context.workspaceService.getModelProvider(workspaceKey) ?? "default";
+    const expectedToolProfile = getDynamicToolProfile(context.workspaceService.getModelProvider(workspaceKey) ?? undefined);
+    const expectedDynamicTools = getDynamicToolsForProvider(context.workspaceService.getModelProvider(workspaceKey) ?? undefined);
+    const workflowCount = context.workflowService?.listConversationWorkflows(conversationKey).length ?? 0;
+    const workflowActivityDashboard = await context.workflowService?.getActivityDashboard?.();
+    const workflowOperationalDashboard = context.workflowService?.getOperationalDashboard?.();
+    const workflowRunnerStats = context.workflowRunner?.getStats?.();
+    let threadModel = selectedModel;
+    let threadProvider = selectedProvider;
     let threadStatus = "not bound";
     let authMode = "unknown";
     let accountLabel = "not signed in";
@@ -92,8 +123,8 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
           model_provider?: string | null;
         };
       };
-      model = configResponse.config?.model ?? model;
-      modelProvider = configResponse.config?.model_provider ?? modelProvider;
+      threadModel = configResponse.config?.model ?? threadModel;
+      threadProvider = configResponse.config?.model_provider ?? threadProvider;
     } catch {
       // Keep configured defaults when app-server status cannot be read.
     }
@@ -140,8 +171,8 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
           };
         };
         threadStatus = threadResponse.thread?.status?.type ?? "unknown";
-        model = threadResponse.thread?.model ?? model;
-        modelProvider = threadResponse.thread?.modelProvider ?? modelProvider;
+        threadModel = threadResponse.thread?.model ?? threadModel;
+        threadProvider = threadResponse.thread?.modelProvider ?? threadProvider;
       } catch {
         threadStatus = "unavailable";
       }
@@ -153,8 +184,14 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
       `reply mode: \`${replyMode}\``,
       `access: \`${formatSandboxMode(sandboxMode)}\``,
       `network: \`${formatNetworkAccess(networkAccess)}\``,
-      `model: \`${model}\``,
-      `provider: \`${modelProvider}\``,
+      `selected model: \`${selectedModel}\``,
+      `selected provider: \`${selectedProvider}\``,
+      `model override: \`${modelOverride ?? "none"}\``,
+      `provider override: \`${providerOverride ?? "none"}\``,
+      `expected thread tool profile: \`${expectedToolProfile ?? "none"}\``,
+      `expected dynamic tools: \`${expectedDynamicTools.map((tool) => tool.name).join(", ") || "none"}\``,
+      `background workflows: \`${workflowCount}\``,
+      `workflow thread policy: \`${context.config.workflowDefaults.reuseConversationThread ? "reuse-conversation-thread" : "dedicated-workflow-thread"}\``,
       `auth mode: \`${authMode}\``,
       `account: \`${accountLabel}\``,
       `plan: \`${planLabel}\``,
@@ -163,13 +200,76 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
     ];
 
     if (!session) {
+      if (workflowActivityDashboard) {
+        for (const window of workflowActivityDashboard.windows) {
+          lines.push(formatWorkflowActivityLine(window.label, window.summary));
+        }
+      }
+      if (workflowOperationalDashboard) {
+        lines.push(
+          `workflow ops: \`overdue=${workflowOperationalDashboard.overdueWaiting.length}, stalled=${workflowOperationalDashboard.stalledRunning.length}, paused=${workflowOperationalDashboard.paused.length}, failed=${workflowOperationalDashboard.failed.length}, high_failure=${workflowOperationalDashboard.highFailure.length}, recent_active=${workflowOperationalDashboard.recentActive.length}\``,
+        );
+        lines.push(
+          `workflow status counts: \`${formatCompactCounts(workflowOperationalDashboard.statusCounts, ["queued", "running", "waiting", "paused", "completed", "failed", "cancelled"])}\``,
+        );
+        lines.push(
+          `workflow providers: \`${formatTopPairs(workflowOperationalDashboard.providerCounts.map((entry) => ({ label: entry.provider, count: entry.count })))}\``,
+        );
+        lines.push(
+          `workflow hotspots: \`workspaces=${formatTopPairs(workflowOperationalDashboard.workspaceHotspots.map((entry) => ({ label: entry.workspaceKey, count: entry.activeCount })))}; conversations=${formatTopPairs(workflowOperationalDashboard.conversationHotspots.map((entry) => ({ label: entry.conversationKey, count: entry.activeCount })))}\``,
+        );
+      }
+      if (workflowRunnerStats) {
+        lines.push(`workflow runner: \`${workflowRunnerStats.running ? "running" : "stopped"}\``);
+        lines.push(
+          `workflow runner stats: \`due=${workflowRunnerStats.workflowCounts.due}, total=${workflowRunnerStats.workflowCounts.total}, wakeups=${workflowRunnerStats.counters.wakeRequests}, steps=${workflowRunnerStats.counters.stepsStarted}/${workflowRunnerStats.counters.stepsCompleted}/${workflowRunnerStats.counters.stepsFailed}\``,
+        );
+      }
       lines.push("No Codex session is mapped to this conversation yet.");
       await message.reply(lines.join("\n"));
       return;
     }
 
     lines.push(`thread: \`${session.threadId}\``);
+    lines.push(`session thread tool profile: \`${session.threadToolProfile ?? "none"}\``);
+    lines.push(
+      `session dynamic tools: \`${getDynamicToolsForToolProfile(session.threadToolProfile).map((tool) => tool.name).join(", ") || "none"}\``,
+    );
+    lines.push(`tool profile matches selection: \`${(session.threadToolProfile ?? null) === expectedToolProfile ? "yes" : "no"}\``);
     lines.push(`thread status: \`${threadStatus}\``);
+    lines.push(`thread model: \`${threadModel}\``);
+    lines.push(`thread provider: \`${threadProvider}\``);
+    if (workflowActivityDashboard) {
+      for (const window of workflowActivityDashboard.windows) {
+        lines.push(formatWorkflowActivityLine(window.label, window.summary));
+      }
+      if (workflowActivityDashboard.recentFailures.length > 0) {
+        const latestFailure = workflowActivityDashboard.recentFailures[0];
+        lines.push(`workflow latest failure: \`${latestFailure.workflowId} @ ${latestFailure.at}\``);
+      }
+    }
+    if (workflowOperationalDashboard) {
+      lines.push(
+        `workflow ops: \`overdue=${workflowOperationalDashboard.overdueWaiting.length}, stalled=${workflowOperationalDashboard.stalledRunning.length}, paused=${workflowOperationalDashboard.paused.length}, failed=${workflowOperationalDashboard.failed.length}, high_failure=${workflowOperationalDashboard.highFailure.length}, recent_active=${workflowOperationalDashboard.recentActive.length}\``,
+      );
+      lines.push(
+        `workflow status counts: \`${formatCompactCounts(workflowOperationalDashboard.statusCounts, ["queued", "running", "waiting", "paused", "completed", "failed", "cancelled"])}\``,
+      );
+      lines.push(
+        `workflow providers: \`${formatTopPairs(workflowOperationalDashboard.providerCounts.map((entry) => ({ label: entry.provider, count: entry.count })))}\``,
+      );
+      lines.push(
+        `workflow hotspots: \`workspaces=${formatTopPairs(workflowOperationalDashboard.workspaceHotspots.map((entry) => ({ label: entry.workspaceKey, count: entry.activeCount })))}; conversations=${formatTopPairs(workflowOperationalDashboard.conversationHotspots.map((entry) => ({ label: entry.conversationKey, count: entry.activeCount })))}\``,
+      );
+    }
+    if (workflowRunnerStats) {
+      lines.push(`workflow runner: \`${workflowRunnerStats.running ? "running" : "stopped"}\``);
+      lines.push(
+        `workflow runner stats: \`due=${workflowRunnerStats.workflowCounts.due}, total=${workflowRunnerStats.workflowCounts.total}, wakeups=${workflowRunnerStats.counters.wakeRequests}, steps=${workflowRunnerStats.counters.stepsStarted}/${workflowRunnerStats.counters.stepsCompleted}/${workflowRunnerStats.counters.stepsFailed}\``,
+      );
+      lines.push(`workflow runner interval: \`${workflowRunnerStats.intervalMs}ms\``);
+      lines.push(`workflow runner last error: \`${workflowRunnerStats.lastError ?? "none"}\``);
+    }
     await message.reply(lines.join("\n"));
   };
 }

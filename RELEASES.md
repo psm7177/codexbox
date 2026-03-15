@@ -23,6 +23,10 @@ Recommended format:
 
 ## Unreleased
 
+- Added workspace-scoped model/provider controls with `!codex model`, `!codex models`, `!codex provider`, and `!codex providers`, including local Ollama model discovery.
+- Added safer provider switching by clearing stale model overrides, resetting threads on provider changes, and showing selected-vs-thread model/provider state in `!codex status`.
+- Added an Ollama-local `web_search` dynamic tool path with PubMed routing for biological queries and Unpaywall-based open-access PDF downloads by DOI.
+- Added an Ollama cloud rate-limit hint for `429 Too Many Requests` errors when a `*-cloud` model is selected.
 - Added admin-only `!codex workspace` to change the next startup `CODEX_WORKSPACE` safely.
 - Added access hardening with Discord allowlists, admin-only sensitive commands, and tighter app-server env filtering.
 - Added traceable Discord error references with `!codex error <error-id>`.

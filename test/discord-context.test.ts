@@ -22,6 +22,15 @@ test("splitDiscordMessage preserves all content", () => {
   assert.equal(chunks.length, 3);
 });
 
+test("splitDiscordMessage prefers sentence boundaries", () => {
+  const text = "First sentence ends here. Second sentence ends here. Third sentence keeps going.";
+  const chunks = splitDiscordMessage(text, 45);
+
+  assert.equal(chunks.length, 3);
+  assert.equal(chunks[0], "First sentence ends here.");
+  assert.equal(chunks.join(" "), text);
+});
+
 test("thread conversation key uses thread id and workspace key uses parent channel id", () => {
   const message = {
     guildId: "guild-1",

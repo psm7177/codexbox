@@ -1,5 +1,6 @@
 import { requireAdmin } from "./auth.js";
 import type { CommandContext, CommandHandler } from "./types.js";
+import { getDynamicToolProfile } from "../dynamic-tools.js";
 
 export function createBindCommand(context: CommandContext): CommandHandler {
   return async (message, args) => {
@@ -14,7 +15,9 @@ export function createBindCommand(context: CommandContext): CommandHandler {
     }
 
     const conversationKey = context.getConversationKey(message);
-    await context.conversationService.saveThread(conversationKey, threadId);
+    const workspaceKey = context.getWorkspaceKey(message);
+    const threadToolProfile = getDynamicToolProfile(context.workspaceService.getModelProvider(workspaceKey));
+    await context.conversationService.saveThread(conversationKey, threadId, { threadToolProfile });
     await message.reply(`Bound this conversation to Codex thread \`${threadId}\`.`);
   };
 }

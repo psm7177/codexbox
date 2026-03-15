@@ -11,8 +11,12 @@ export class ConversationService {
     return this.store.get(conversationKey);
   }
 
-  async saveThread(conversationKey: string, threadId: string): Promise<SessionRecord> {
-    const session = { threadId };
+  async saveThread(
+    conversationKey: string,
+    threadId: string,
+    options?: Omit<SessionRecord, "threadId">,
+  ): Promise<SessionRecord> {
+    const session = { threadId, ...options };
     await this.store.set(conversationKey, session);
     return session;
   }
