@@ -77,7 +77,7 @@ interface UnpaywallResponse {
   oa_locations?: UnpaywallLocation[] | null;
 }
 
-const OLLAMA_WEB_SEARCH_TOOL_PROFILE = "ollama-web-search-v1";
+const OLLAMA_WEB_SEARCH_TOOL_PROFILE = "ollama-research-tools-v2";
 const DEFAULT_RESULT_LIMIT = 5;
 const MAX_RESULT_LIMIT = 8;
 const SEARCH_BACKEND_BASE_URL = "https://r.jina.ai/http://www.ecosia.org/search";
@@ -133,6 +133,10 @@ const DOWNLOAD_OPEN_ACCESS_PDF_TOOL: DynamicToolSpec = {
     required: ["doi"],
     additionalProperties: false,
   },
+};
+
+const DYNAMIC_TOOLS_BY_PROFILE: Record<string, DynamicToolSpec[]> = {
+  [OLLAMA_WEB_SEARCH_TOOL_PROFILE]: [OLLAMA_WEB_SEARCH_TOOL, DOWNLOAD_OPEN_ACCESS_PDF_TOOL],
 };
 
 function uniqueStrings(values: string[]): string[] {
@@ -634,10 +638,16 @@ export function getDynamicToolProfile(modelProvider?: string): string | null {
   return modelProvider === "ollama" ? OLLAMA_WEB_SEARCH_TOOL_PROFILE : null;
 }
 
+export function getDynamicToolsForToolProfile(toolProfile?: string | null): DynamicToolSpec[] {
+  if (!toolProfile) {
+    return [];
+  }
+
+  return DYNAMIC_TOOLS_BY_PROFILE[toolProfile] ?? [];
+}
+
 export function getDynamicToolsForProvider(modelProvider?: string): DynamicToolSpec[] {
-  return getDynamicToolProfile(modelProvider) === OLLAMA_WEB_SEARCH_TOOL_PROFILE
-    ? [OLLAMA_WEB_SEARCH_TOOL, DOWNLOAD_OPEN_ACCESS_PDF_TOOL]
-    : [];
+  return getDynamicToolsForToolProfile(getDynamicToolProfile(modelProvider));
 }
 
 export async function executeDynamicToolCall(

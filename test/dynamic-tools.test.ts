@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   executeDynamicToolCall,
   getDynamicToolProfile,
+  getDynamicToolsForToolProfile,
   getDynamicToolsForProvider,
   parseEcosiaSearchMarkdown,
 } from "../src/dynamic-tools.js";
@@ -69,10 +70,13 @@ const SAMPLE_PUBMED_SUMMARY_RESPONSE = {
 
 test("getDynamicToolsForProvider exposes web_search for ollama only", () => {
   assert.equal(getDynamicToolProfile("openai"), null);
-  assert.equal(getDynamicToolProfile("ollama"), "ollama-web-search-v1");
+  assert.equal(getDynamicToolProfile("ollama"), "ollama-research-tools-v2");
   assert.equal(getDynamicToolsForProvider("openai").length, 0);
   assert.equal(getDynamicToolsForProvider("ollama")[0]?.name, "web_search");
   assert.equal(getDynamicToolsForProvider("ollama")[1]?.name, "download_open_access_pdf");
+  assert.equal(getDynamicToolsForToolProfile("ollama-research-tools-v2")[0]?.name, "web_search");
+  assert.equal(getDynamicToolsForToolProfile("ollama-research-tools-v2")[1]?.name, "download_open_access_pdf");
+  assert.equal(getDynamicToolsForToolProfile("unknown").length, 0);
 });
 
 test("parseEcosiaSearchMarkdown extracts result titles, urls, and snippets", () => {
