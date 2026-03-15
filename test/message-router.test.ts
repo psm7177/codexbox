@@ -94,6 +94,7 @@ interface TestMessageOptions {
     parentId?: string | null;
     isThread?: () => boolean;
     isSendable?: () => boolean;
+    send?: (content: string) => Promise<unknown>;
   };
   channelId?: string;
   guildId?: string | null;
@@ -110,6 +111,7 @@ function createMessage(options: TestMessageOptions = {}): Message {
     parentId: null,
     isThread: () => false,
     isSendable: () => true,
+    send: async () => undefined,
     ...options.channel,
   };
   const mentionsUsers = { has: () => options.mentioned ?? true };
@@ -301,6 +303,74 @@ test("message router routes commands to command handlers", async () => {
   assert.match(replies[0] ?? "", /usage:/);
   assert.match(replies[0] ?? "", /codex: `75% remaining`/);
   assert.match(replies[0] ?? "", /No Codex session is mapped to this conversation yet\./);
+});
+
+test("message router shows categorized help output", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for help");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for help");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex help",
+      channel: {
+        send: async (content: string) => {
+          replies.push(content);
+          return undefined;
+        },
+      },
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  const helpText = replies.join("\n");
+  assert.match(helpText, /Available commands:/);
+  assert.match(helpText, /Core:/);
+  assert.match(helpText, /Models:/);
+  assert.match(helpText, /Background Work:/);
+  assert.match(helpText, /Workspace:/);
+  assert.match(helpText, /Admin:/);
+  assert.match(helpText, /!codex tools/);
+  assert.match(helpText, /!codex work dashboard/);
 });
 
 test("message router shows workflow breakdowns in the status command", async () => {
