@@ -5,7 +5,9 @@ import type { ErrorTracker } from "../error-tracker.js";
 import type { ActiveTurnRegistry } from "../lifecycle/active-turn-registry.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
+import type { WorkflowService } from "../state/workflow-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
+import type { BackgroundWorkflowRunner } from "../background/background-workflow-runner.js";
 
 export interface ParsedCommand {
   name: string;
@@ -18,6 +20,8 @@ export interface CommandContext {
   restartCoordinator: RestartCoordinator;
   activeTurnRegistry?: ActiveTurnRegistry;
   workspaceService: WorkspaceService;
+  workflowService?: WorkflowService;
+  workflowRunner?: Pick<BackgroundWorkflowRunner, "wake" | "getStats">;
   codexClient: Pick<CodexAppServerClient, "request"> & Partial<Pick<CodexAppServerClient, "interruptTurn">>;
   errorTracker: ErrorTracker;
   getConversationKey: (message: Message) => string;

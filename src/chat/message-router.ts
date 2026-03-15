@@ -16,6 +16,7 @@ import {
 import type { ErrorTracker } from "../error-tracker.js";
 import { resolveLocalReferences } from "../local-references.js";
 import { ActiveTurnRegistry, type ActiveTurnRegistry as ActiveTurnRegistryType } from "../lifecycle/active-turn-registry.js";
+import { ConversationLockManager } from "../lifecycle/conversation-lock-manager.js";
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
@@ -29,6 +30,7 @@ interface MessageRouterOptions {
   conversationService: ConversationService;
   restartCoordinator: RestartCoordinator;
   activeTurnRegistry?: ActiveTurnRegistryType;
+  conversationLockManager?: ConversationLockManager;
   workspaceService: WorkspaceService;
   codexClient: Pick<CodexAppServerClient, "ensureThread" | "startTurn"> &
     Partial<Pick<CodexAppServerClient, "interruptTurn">>;
@@ -77,29 +79,8 @@ function describeMessageSource(message: Message): string {
   return `channel:${message.guild?.name ?? "unknown"}/#${getChannelName(message) ?? message.channelId}`;
 }
 
-function createConversationSerializer(): <T>(key: string, task: () => Promise<T>) => Promise<T> {
-  const conversationLocks = new Map<string, Promise<unknown>>();
-
-  return async function serializeConversation<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = conversationLocks.get(key) ?? Promise.resolve();
-    const current = previous.catch(() => {}).then(task);
-    void current
-      .finally(() => {
-        if (conversationLocks.get(key) === current) {
-          conversationLocks.delete(key);
-        }
-      })
-      .catch(() => {});
-    conversationLocks.set(
-      key,
-      current,
-    );
-    return current;
-  };
-}
-
 export function createMessageCreateHandler(options: MessageRouterOptions): (message: Message) => Promise<void> {
-  const serializeConversation = createConversationSerializer();
+  const conversationLockManager = options.conversationLockManager ?? new ConversationLockManager();
   const runTurn = options.runTurn ?? runCodexTurn;
   const activeTurnRegistry = options.activeTurnRegistry ?? new ActiveTurnRegistry();
   const log = options.log ?? console.log;
@@ -150,7 +131,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
     const conversationKey = getConversationKey(message);
     const workspaceKey = getWorkspaceKey(message);
-    await serializeConversation(conversationKey, async () => {
+    await conversationLockManager.serialize(conversationKey, async () => {
       if (!options.restartCoordinator.beginTurn()) {
         await message.reply(restartReply);
         return;

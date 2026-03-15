@@ -15,6 +15,8 @@ import { createRestartCommand } from "./commands/restart.js";
 import { createSessionsCommand } from "./commands/sessions.js";
 import { createStatusCommand } from "./commands/status.js";
 import { createStopCommand } from "./commands/stop.js";
+import { createToolsCommand } from "./commands/tools.js";
+import { createWorkCommand } from "./commands/work.js";
 import { createWorkspaceCommand } from "./commands/workspace.js";
 import type { CommandContext, CommandHandler, ParsedCommand } from "./commands/types.js";
 
@@ -35,6 +37,8 @@ export function createCommandHandlers(context: CommandContext): Record<string, C
   return {
     help: createHelpCommand(),
     status: createStatusCommand(context),
+    tools: createToolsCommand(context),
+    work: createWorkCommand(context),
     models: createModelsCommand(context),
     providers: createProvidersCommand(context),
     model: createModelCommand(context),

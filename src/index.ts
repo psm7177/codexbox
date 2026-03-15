@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { BackgroundWorkflowRunner } from "./background/background-workflow-runner.js";
 import { createMessageCreateHandler } from "./chat/message-router.js";
 import { CodexAppServerClient } from "./codex-app-server-client.js";
 import { createCommandHandlers } from "./commands.js";
@@ -7,15 +8,19 @@ import { loadConfig } from "./config.js";
 import { getConversationKey, getWorkspaceKey } from "./discord-context.js";
 import { ErrorTracker } from "./error-tracker.js";
 import { ActiveTurnRegistry } from "./lifecycle/active-turn-registry.js";
+import { ConversationLockManager } from "./lifecycle/conversation-lock-manager.js";
 import { RestartCoordinator } from "./lifecycle/restart-coordinator.js";
 import { SessionStore } from "./session-store.js";
 import { ConversationService } from "./state/conversation-service.js";
+import { WorkflowService } from "./state/workflow-service.js";
 import { WorkspaceService } from "./state/workspace-service.js";
 import { createReadyHandler } from "./startup/ready-handler.js";
+import { WorkflowStore } from "./workflow-store.js";
 
 const config = loadConfig();
 const restartCoordinator = new RestartCoordinator();
 const activeTurnRegistry = new ActiveTurnRegistry();
+const conversationLockManager = new ConversationLockManager();
 const errorTracker = new ErrorTracker();
 
 if (!config.discordToken) {
@@ -39,14 +44,33 @@ const discordClient = new Client({
 
 const codexClient = new CodexAppServerClient(config);
 const sessionStore = new SessionStore(config.sessionStorePath);
+const workflowStore = new WorkflowStore(config.workflowDefaults.storePath);
 const conversationService = new ConversationService(sessionStore);
+const workflowService = new WorkflowService(workflowStore, {
+  artifactsRoot: config.workflowDefaults.artifactsPath,
+  retryBaseDelayMs: config.workflowDefaults.retryBaseDelayMs,
+  retryMaxDelayMs: config.workflowDefaults.retryMaxDelayMs,
+  maxFailures: config.workflowDefaults.maxFailures,
+});
 const workspaceService = new WorkspaceService(sessionStore, config);
+const workflowRunner = new BackgroundWorkflowRunner({
+  discordClient,
+  workflowService,
+  conversationService,
+  codexClient,
+  conversationLockManager,
+  activeTurnRegistry,
+  intervalMs: config.workflowDefaults.pollIntervalMs,
+  reuseConversationThread: config.workflowDefaults.reuseConversationThread,
+});
 const commandHandlers = createCommandHandlers({
   config,
   conversationService,
   restartCoordinator,
   activeTurnRegistry,
   workspaceService,
+  workflowService,
+  workflowRunner,
   codexClient,
   errorTracker,
   getConversationKey,
@@ -65,6 +89,7 @@ const handleMessageCreate = createMessageCreateHandler({
   conversationService,
   restartCoordinator,
   activeTurnRegistry,
+  conversationLockManager,
   workspaceService,
   codexClient,
   commandHandlers,
@@ -78,7 +103,10 @@ discordClient.once(
     discordClient,
     config,
     sessionStore,
+    workflowStore,
+    workflowService,
     codexClient,
+    workflowRunner,
   }),
 );
 

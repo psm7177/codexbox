@@ -42,6 +42,16 @@ interface TurnDefaults {
   sandboxPolicy: SandboxPolicy;
 }
 
+interface WorkflowDefaults {
+  storePath: string;
+  artifactsPath: string;
+  pollIntervalMs: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  maxFailures: number;
+  reuseConversationThread: boolean;
+}
+
 export interface Config {
   discordToken: string;
   discordClientId: string;
@@ -55,6 +65,7 @@ export interface Config {
   sandboxMode: SandboxMode;
   sandboxNetworkAccess: boolean;
   sessionStorePath: string;
+  workflowDefaults: WorkflowDefaults;
   appServerCommand: AppServerCommand;
   clientInfo: ClientInfo;
   threadDefaults: ThreadDefaults;
@@ -118,6 +129,21 @@ function splitCsv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseInteger(value: string | undefined, fallback: number, options?: { min?: number; max?: number }): number {
+  if (value == null || value.trim() === "") {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  const min = options?.min ?? Number.MIN_SAFE_INTEGER;
+  const max = options?.max ?? Number.MAX_SAFE_INTEGER;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 export function buildSandboxPolicy(mode: SandboxMode, networkAccess: boolean, workspace: string): SandboxPolicy {
   if (mode === "dangerFullAccess") {
     return { type: "dangerFullAccess" };
@@ -162,6 +188,8 @@ export function loadConfig(): Config {
   const sandboxMode = (process.env.CODEX_SANDBOX_MODE ?? "workspaceWrite") as SandboxMode;
   const sandboxNetworkAccess = parseBoolean(process.env.CODEX_SANDBOX_NETWORK, false);
   const sessionStorePath = path.resolve(process.env.SESSION_STORE_PATH ?? ".data/sessions.json");
+  const workflowStorePath = path.resolve(process.env.WORKFLOW_STORE_PATH ?? ".data/workflows.json");
+  const workflowArtifactsPath = path.resolve(process.env.WORKFLOW_ARTIFACTS_PATH ?? ".data/workflows");
   const appServerBin = process.env.CODEX_APP_SERVER_BIN || "codex";
   const appServerArgs =
     process.env.CODEX_APP_SERVER_ARGS && process.env.CODEX_APP_SERVER_ARGS.trim() !== ""
@@ -185,6 +213,15 @@ export function loadConfig(): Config {
     sandboxMode,
     sandboxNetworkAccess,
     sessionStorePath,
+    workflowDefaults: {
+      storePath: workflowStorePath,
+      artifactsPath: workflowArtifactsPath,
+      pollIntervalMs: parseInteger(process.env.CODEX_WORKFLOW_POLL_INTERVAL_MS, 15_000, { min: 1_000, max: 3_600_000 }),
+      retryBaseDelayMs: parseInteger(process.env.CODEX_WORKFLOW_RETRY_BASE_DELAY_MS, 60_000, { min: 1_000, max: 3_600_000 }),
+      retryMaxDelayMs: parseInteger(process.env.CODEX_WORKFLOW_RETRY_MAX_DELAY_MS, 3_600_000, { min: 1_000, max: 86_400_000 }),
+      maxFailures: parseInteger(process.env.CODEX_WORKFLOW_MAX_FAILURES, 5, { min: 1, max: 100 }),
+      reuseConversationThread: parseBoolean(process.env.CODEX_WORKFLOW_REUSE_CONVERSATION_THREAD, false),
+    },
     appServerCommand: {
       bin: appServerBin,
       args: appServerArgs,

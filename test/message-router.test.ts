@@ -12,7 +12,9 @@ import { ErrorTracker } from "../src/error-tracker.js";
 import { RestartCoordinator } from "../src/lifecycle/restart-coordinator.js";
 import { SessionStore } from "../src/session-store.js";
 import { ConversationService } from "../src/state/conversation-service.js";
+import { WorkflowService } from "../src/state/workflow-service.js";
 import { WorkspaceService } from "../src/state/workspace-service.js";
+import { WorkflowStore } from "../src/workflow-store.js";
 import { createMessageCreateHandler } from "../src/chat/message-router.js";
 
 function createConfig(workspace: string): Config {
@@ -29,6 +31,15 @@ function createConfig(workspace: string): Config {
     sandboxMode: "workspaceWrite",
     sandboxNetworkAccess: false,
     sessionStorePath: path.join(workspace, ".data", "sessions.json"),
+    workflowDefaults: {
+      storePath: path.join(workspace, ".data", "workflows.json"),
+      artifactsPath: path.join(workspace, ".data", "workflows"),
+      pollIntervalMs: 15_000,
+      retryBaseDelayMs: 60_000,
+      retryMaxDelayMs: 3_600_000,
+      maxFailures: 5,
+      reuseConversationThread: false,
+    },
     appServerCommand: {
       bin: "codex",
       args: ["app-server", "--listen", "stdio://"],
@@ -280,6 +291,9 @@ test("message router routes commands to command handlers", async () => {
   assert.match(replies[0] ?? "", /selected provider: `openai`/);
   assert.match(replies[0] ?? "", /model override: `none`/);
   assert.match(replies[0] ?? "", /provider override: `none`/);
+  assert.match(replies[0] ?? "", /expected thread tool profile: `none`/);
+  assert.match(replies[0] ?? "", /expected dynamic tools: `none`/);
+  assert.match(replies[0] ?? "", /background workflows: `0`/);
   assert.match(replies[0] ?? "", /auth mode: `chatgpt`/);
   assert.match(replies[0] ?? "", /account: `user@example\.com`/);
   assert.match(replies[0] ?? "", /plan: `pro`/);
@@ -287,6 +301,838 @@ test("message router routes commands to command handlers", async () => {
   assert.match(replies[0] ?? "", /usage:/);
   assert.match(replies[0] ?? "", /codex: `75% remaining`/);
   assert.match(replies[0] ?? "", /No Codex session is mapped to this conversation yet\./);
+});
+
+test("message router shows workflow breakdowns in the status command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "summarize recent workflow outputs",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "ollama",
+    threadPolicy: "dedicated-workflow-thread",
+  });
+
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return {
+          running: true,
+          tickInFlight: false,
+          startedAt: null,
+          lastWakeAt: null,
+          lastRunStartedAt: null,
+          lastRunCompletedAt: null,
+          lastError: null,
+          intervalMs: 15_000,
+          reuseConversationThread: false,
+          workflowCounts: {
+            total: 1,
+            queued: 1,
+            running: 0,
+            waiting: 0,
+            paused: 0,
+            completed: 0,
+            failed: 0,
+            cancelled: 0,
+            due: 1,
+          },
+          counters: {
+            wakeRequests: 0,
+            stepsStarted: 0,
+            stepsCompleted: 0,
+            stepsFailed: 0,
+            updatesSent: 0,
+            filesSent: 0,
+            imagesSent: 0,
+          },
+        };
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for status");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for status");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex status",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.match(replies[0] ?? "", /workflow status counts: `queued=1, running=0, waiting=0, paused=0, completed=0, failed=0, cancelled=0`/);
+  assert.match(replies[0] ?? "", /workflow providers: `ollama=1`/);
+  assert.match(replies[0] ?? "", /workflow hotspots: `workspaces=dm:channel-1=1; conversations=dm:channel-1=1`/);
+});
+
+test("message router shows injected tools for ollama through the tools command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  await workspaceService.setModelProvider("dm:channel-1", "ollama");
+  await workspaceService.setModel("dm:channel-1", "gpt-oss:20b");
+  await conversationService.saveThread("dm:channel-1", "thread-ollama", {
+    threadToolProfile: "ollama-research-tools-v2",
+  });
+
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  let ensureThreadCalled = false;
+  let runTurnCalled = false;
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        ensureThreadCalled = true;
+        return "thread-1";
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for tools command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {
+      runTurnCalled = true;
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex tools",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(ensureThreadCalled, false);
+  assert.equal(runTurnCalled, false);
+  assert.match(replies[0] ?? "", /Injected tools for this workspace:/);
+  assert.match(replies[0] ?? "", /selected model: `gpt-oss:20b`/);
+  assert.match(replies[0] ?? "", /selected provider: `ollama`/);
+  assert.match(replies[0] ?? "", /expected thread tool profile: `ollama-research-tools-v2`/);
+  assert.match(replies[0] ?? "", /expected dynamic tools: `web_search, download_open_access_pdf`/);
+  assert.match(replies[0] ?? "", /- web_search:/);
+  assert.match(replies[0] ?? "", /- download_open_access_pdf:/);
+  assert.match(replies[0] ?? "", /session thread: `thread-ollama`/);
+  assert.match(replies[0] ?? "", /session thread tool profile: `ollama-research-tools-v2`/);
+  assert.match(replies[0] ?? "", /session dynamic tools: `web_search, download_open_access_pdf`/);
+  assert.match(replies[0] ?? "", /tool profile matches selection: `yes`/);
+});
+
+test("message router queues background workflows through the work command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work command");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex work keep triaging new DOI arrivals",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.match(replies[0] ?? "", /Queued workflow `wf_/);
+  assert.equal(workflowService.listConversationWorkflows("dm:channel-1").length, 1);
+});
+
+test("message router rejects duplicate active workflow goals in the same conversation", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "keep triaging new DOI arrivals",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "openai",
+    threadId: null,
+    threadToolProfile: null,
+  });
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work command");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex work keep triaging new DOI arrivals",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.match(replies[0] ?? "", /similar active workflow already exists/);
+  assert.equal(workflowService.listConversationWorkflows("dm:channel-1").length, 1);
+});
+
+test("message router creates a workflow with an explicit dedicated thread policy flag", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  config.workflowDefaults.reuseConversationThread = true;
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.set("dm:channel-1", { threadId: "thread-foreground" });
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work command");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex work --dedicated-thread keep triaging new DOI arrivals",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  const workflow = workflowService.listConversationWorkflows("dm:channel-1")[0];
+  assert.equal(workflow?.threadPolicy, "dedicated-workflow-thread");
+  assert.equal(workflow?.threadId, null);
+  assert.match(replies[0] ?? "", /thread policy: `dedicated-workflow-thread`/);
+});
+
+test("message router shows and pauses background workflows through the work command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const workflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "keep triaging new DOI arrivals",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "openai",
+    threadId: null,
+    threadToolProfile: null,
+  });
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work command");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex work show ${workflow.id}`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex work pause ${workflow.id}`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex work resume ${workflow.id}`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.match(replies[0] ?? "", new RegExp(`Workflow \`${workflow.id}\``));
+  assert.match(replies[0] ?? "", /artifacts:/);
+  assert.match(replies[1] ?? "", /Paused workflow/);
+  assert.match(replies[2] ?? "", /Resumed workflow/);
+});
+
+test("message router queues a mid-work note for the next workflow step", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const workflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "accept a note",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "openai",
+    threadId: null,
+    threadToolProfile: null,
+    threadPolicy: "dedicated-workflow-thread",
+  });
+
+  let wakeCount = 0;
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {
+        wakeCount += 1;
+      },
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work note");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work note");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex work note ${workflow.id} Prioritize the supplementary appendix.`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  const updated = workflowService.getWorkflow(workflow.id);
+  assert.deepEqual(updated?.pendingPrompts, ["Prioritize the supplementary appendix."]);
+  assert.equal(wakeCount, 1);
+  assert.match(replies[0] ?? "", /Queued a workflow note/);
+});
+
+test("message router lets admins retry a failed workflow with thread policy overrides", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  config.restartAdminUserIds = ["admin-1"];
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.set("dm:channel-1", { threadId: "thread-foreground" });
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+    maxFailures: 1,
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const workflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "retry a failed workflow",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "ollama",
+    threadId: "thread-old",
+    threadToolProfile: "ollama-research-tools-v2",
+    threadPolicy: "dedicated-workflow-thread",
+  });
+  await workflowService.markFailed(workflow.id, { error: "boom" });
+
+  let wakeCount = 0;
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {
+        wakeCount += 1;
+      },
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work command");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work command");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      authorId: "admin-1",
+      content: `<@bot-1> !codex work retry ${workflow.id} 15 reuse-thread`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  const retried = workflowService.getWorkflow(workflow.id);
+  assert.equal(retried?.status, "waiting");
+  assert.equal(retried?.failureCount, 0);
+  assert.equal(retried?.threadPolicy, "reuse-conversation-thread");
+  assert.equal(retried?.threadId, "thread-foreground");
+  assert.equal(wakeCount, 1);
+  assert.match(replies[0] ?? "", /Retried workflow/);
+});
+
+test("message router shows the workflow dashboard for admins", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  config.restartAdminUserIds = ["admin-1"];
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+    maxFailures: 1,
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const overdueWorkflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "overdue workflow",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "ollama",
+    threadId: null,
+    threadToolProfile: null,
+    threadPolicy: "dedicated-workflow-thread",
+  });
+  await workflowService.markWaiting(overdueWorkflow.id, {
+    nextRunAt: new Date(Date.now() - 30_000),
+    handoffSummary: "still waiting",
+    clearError: true,
+  });
+  const failedWorkflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "failed workflow",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "ollama",
+    threadId: null,
+    threadToolProfile: null,
+    threadPolicy: "dedicated-workflow-thread",
+  });
+  await workflowService.markFailed(failedWorkflow.id, { error: "broken" });
+
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work dashboard");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work dashboard");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      authorId: "admin-1",
+      content: "<@bot-1> !codex work dashboard",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.match(replies[0] ?? "", /activity trends:/);
+  assert.match(replies[0] ?? "", /operational snapshot: overdue=/);
+  assert.match(replies[0] ?? "", /status counts: queued=/);
+  assert.match(replies[0] ?? "", /top providers:/);
+  assert.match(replies[0] ?? "", /workspace hotspots:/);
+  assert.match(replies[0] ?? "", /conversation hotspots:/);
+  assert.match(replies[0] ?? "", /overdue waiting:/);
 });
 
 test("message router lists models through the models command", async () => {
@@ -1540,7 +2386,7 @@ test("message router starts a new thread when ollama needs a web-search-capable 
   assert.equal(ensureThreadMetadata[0]?.threadId, undefined);
   assert.deepEqual(conversationService.getSession("channel:guild-1:channel-1"), {
     threadId: "thread-ollama",
-    threadToolProfile: "ollama-web-search-v1",
+    threadToolProfile: "ollama-research-tools-v2",
   });
 });
 
@@ -1551,7 +2397,7 @@ test("message router reuses an ollama thread when the tool profile already match
   await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
   await sessionStore.set("channel:guild-1:channel-1", {
     threadId: "thread-ollama",
-    threadToolProfile: "ollama-web-search-v1",
+    threadToolProfile: "ollama-research-tools-v2",
   });
   const conversationService = new ConversationService(sessionStore);
   const workspaceService = new WorkspaceService(sessionStore, config);
@@ -1597,6 +2443,6 @@ test("message router reuses an ollama thread when the tool profile already match
   assert.equal(ensureThreadMetadata[0]?.threadId, "thread-ollama");
   assert.deepEqual(conversationService.getSession("channel:guild-1:channel-1"), {
     threadId: "thread-ollama",
-    threadToolProfile: "ollama-web-search-v1",
+    threadToolProfile: "ollama-research-tools-v2",
   });
 });
