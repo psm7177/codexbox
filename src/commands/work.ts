@@ -436,10 +436,10 @@ export function createWorkCommand(context: CommandContext): CommandHandler {
       return;
     }
 
-    if (subcommand === "cancel") {
+    if (subcommand === "cancel" || subcommand === "stop") {
       const workflowId = args[1]?.trim();
       if (!workflowId) {
-        await message.reply("Usage: `!codex work cancel <workflow-id>`");
+        await message.reply("Usage: `!codex work cancel <workflow-id>` or `!codex work stop <workflow-id>`");
         return;
       }
 
@@ -456,6 +456,13 @@ export function createWorkCommand(context: CommandContext): CommandHandler {
       const cancelled = await context.workflowService.cancelWorkflow(workflowId);
       if (!cancelled) {
         await message.reply(`Workflow \`${workflowId}\` could not be cancelled.`);
+        return;
+      }
+
+      if (workflow.status === "running") {
+        await message.reply(
+          `Stop requested for workflow \`${cancelled.id}\`. The current step may finish, but it will not be scheduled again.`,
+        );
         return;
       }
 

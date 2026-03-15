@@ -467,7 +467,7 @@ export class WorkflowService {
 
   async cancelWorkflow(id: string): Promise<WorkflowRecord | null> {
     const workflow = this.store.get(id);
-    if (!workflow) {
+    if (!workflow || workflow.status === "completed" || workflow.status === "cancelled") {
       return null;
     }
 
@@ -628,9 +628,9 @@ export class WorkflowService {
 
     const updated: WorkflowRecord = {
       ...workflow,
-      status: workflow.status === "paused" ? "paused" : "waiting",
+      status: workflow.status === "cancelled" ? "cancelled" : workflow.status === "paused" ? "paused" : "waiting",
       updatedAt: nowIso(),
-      nextRunAt: workflow.status === "paused" ? null : input.nextRunAt.toISOString(),
+      nextRunAt: workflow.status === "cancelled" || workflow.status === "paused" ? null : input.nextRunAt.toISOString(),
       stepCount: workflow.stepCount + 1,
       failureCount: input.clearError ? 0 : workflow.failureCount,
       handoffSummary: clampSummary(input.handoffSummary ?? workflow.handoffSummary),
@@ -648,7 +648,9 @@ export class WorkflowService {
     await this.saveRecord(updated, {
       type: "waiting",
       message:
-        updated.status === "paused"
+        updated.status === "cancelled"
+          ? "Workflow step finished after a cancellation request; it will not be scheduled again."
+          : updated.status === "paused"
           ? "Workflow step finished while paused; waiting for manual resume."
           : "Workflow step finished and scheduled another run.",
     });
@@ -674,7 +676,7 @@ export class WorkflowService {
 
     const updated: WorkflowRecord = {
       ...workflow,
-      status: "completed",
+      status: workflow.status === "cancelled" ? "cancelled" : "completed",
       updatedAt: nowIso(),
       nextRunAt: null,
       stepCount: workflow.stepCount + 1,
@@ -692,8 +694,11 @@ export class WorkflowService {
       threadPolicy: normalizeThreadPolicy(workflow.threadPolicy),
     };
     await this.saveRecord(updated, {
-      type: "completed",
-      message: "Workflow completed.",
+      type: updated.status === "cancelled" ? "cancelled" : "completed",
+      message:
+        updated.status === "cancelled"
+          ? "Workflow step finished after a cancellation request; workflow remains cancelled."
+          : "Workflow completed.",
     });
     return updated;
   }
@@ -717,7 +722,13 @@ export class WorkflowService {
     const failureCount = workflow.failureCount + 1;
     const retryAt = input.retryAt ?? new Date(Date.now() + this.getRetryDelayMs(workflow.failureCount));
     const nextStatus: WorkflowStatus =
-      workflow.status === "paused" ? "paused" : failureCount >= this.maxFailures ? "failed" : "waiting";
+      workflow.status === "cancelled"
+        ? "cancelled"
+        : workflow.status === "paused"
+          ? "paused"
+          : failureCount >= this.maxFailures
+            ? "failed"
+            : "waiting";
 
     const updated: WorkflowRecord = {
       ...workflow,
@@ -735,7 +746,9 @@ export class WorkflowService {
     await this.saveRecord(updated, {
       type: "failed",
       message:
-        nextStatus === "waiting"
+        nextStatus === "cancelled"
+          ? `Workflow step failed after a cancellation request: ${input.error}`
+          : nextStatus === "waiting"
           ? `Workflow step failed and will retry: ${input.error}`
           : `Workflow failed: ${input.error}`,
     });
@@ -759,7 +772,7 @@ export class WorkflowService {
 
     const updated: WorkflowRecord = {
       ...workflow,
-      status: "failed",
+      status: workflow.status === "cancelled" ? "cancelled" : "failed",
       updatedAt: nowIso(),
       nextRunAt: null,
       stepCount: workflow.stepCount + 1,
@@ -771,8 +784,11 @@ export class WorkflowService {
       threadPolicy: normalizeThreadPolicy(workflow.threadPolicy),
     };
     await this.saveRecord(updated, {
-      type: "terminal_failed",
-      message: `Workflow failed without retry: ${input.error}`,
+      type: updated.status === "cancelled" ? "cancelled" : "terminal_failed",
+      message:
+        updated.status === "cancelled"
+          ? `Workflow step failed after a cancellation request: ${input.error}`
+          : `Workflow failed without retry: ${input.error}`,
     });
     return updated;
   }

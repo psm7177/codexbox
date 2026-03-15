@@ -114,3 +114,41 @@ test("workflow service creates durable queued workflows and schedules retries", 
   assert.match(planWarnings, /No plan warnings/);
   assert.ok(events.length >= 3);
 });
+
+test("workflow service preserves cancellation after a running step finishes", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-workflow-"));
+  const store = new WorkflowStore(path.join(workspace, "workflows.json"));
+  await store.load();
+  const service = new WorkflowService(store, {
+    artifactsRoot: path.join(workspace, "artifacts"),
+  });
+
+  const workflow = await service.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "stop after current step",
+    cwd: workspace,
+    model: "gpt-oss:20b",
+    modelProvider: "ollama",
+    threadId: "thread-1",
+    threadToolProfile: "ollama-research-tools-v2",
+    threadPolicy: "reuse-conversation-thread",
+  });
+
+  await service.markRunning(workflow.id, { threadId: "thread-1", threadToolProfile: "ollama-research-tools-v2" });
+  const cancelled = await service.cancelWorkflow(workflow.id);
+  assert.equal(cancelled?.status, "cancelled");
+
+  const afterStep = await service.markWaiting(workflow.id, {
+    nextRunAt: new Date(Date.now() + 60_000),
+    handoffSummary: "this should not reschedule",
+    clearError: true,
+  });
+
+  assert.equal(afterStep?.status, "cancelled");
+  assert.equal(afterStep?.nextRunAt, null);
+  assert.equal(afterStep?.stepCount, 1);
+});

@@ -904,6 +904,90 @@ test("message router shows and pauses background workflows through the work comm
   assert.match(replies[2] ?? "", /Resumed workflow/);
 });
 
+test("message router treats work stop as a workflow cancellation command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const workflowStore = new WorkflowStore(path.join(workspace, ".data", "workflows.json"));
+  await workflowStore.load();
+  const conversationService = new ConversationService(sessionStore);
+  const workflowService = new WorkflowService(workflowStore, {
+    artifactsRoot: path.join(workspace, ".data", "workflows"),
+  });
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const workflow = await workflowService.createWorkflow({
+    conversationKey: "dm:channel-1",
+    workspaceKey: "dm:channel-1",
+    conversationKind: "dm",
+    channelId: "channel-1",
+    guildId: null,
+    goal: "keep triaging new DOI arrivals",
+    cwd: workspace,
+    model: "gpt-test",
+    modelProvider: "openai",
+    threadId: null,
+    threadToolProfile: null,
+  });
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    workflowService,
+    workflowRunner: {
+      wake() {},
+      getStats() {
+        return undefined as never;
+      },
+    },
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for work stop");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for work stop");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: `<@bot-1> !codex work stop ${workflow.id}`,
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(workflowService.listConversationWorkflows("dm:channel-1").length, 1);
+  assert.equal(workflowService.getWorkflow(workflow.id)?.status, "cancelled");
+  assert.match(replies[0] ?? "", /Cancelled workflow/);
+});
+
 test("message router queues a mid-work note for the next workflow step", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
   const config = createConfig(workspace);

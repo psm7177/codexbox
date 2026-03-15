@@ -40,6 +40,7 @@ const HELP_SECTIONS: CommandSection[] = [
       "`!codex work pause <workflow-id>` Pause a workflow",
       "`!codex work resume <workflow-id>` Resume a paused or failed workflow",
       "`!codex work cancel <workflow-id>` Cancel a workflow",
+      "`!codex work stop <workflow-id>` Stop a workflow without queueing a new goal",
       "`!codex work all` List all workflows (admin)",
       "`!codex work dashboard` Show activity and hotspot summaries (admin)",
       "`!codex work retry <workflow-id> [delay-seconds] [keep-thread|reuse-thread|dedicated-thread]` Retry a failed workflow (admin)",

@@ -1086,7 +1086,7 @@ export class BackgroundWorkflowRunner {
       await this.sendWorkflowArtifacts(channel, workflow, result.imageArtifacts, controlState.outputPaths);
 
       if (controlState.status === "completed") {
-        await this.options.workflowService.markCompleted(workflow.id, {
+        const completed = await this.options.workflowService.markCompleted(workflow.id, {
           handoffSummary: controlState.summary,
           plan: controlState.plan,
           planWarnings: controlState.planWarnings,
@@ -1096,11 +1096,19 @@ export class BackgroundWorkflowRunner {
           clearPendingPrompts: true,
         });
         this.stepsCompleted += 1;
-        this.updatesSent += await sendWorkflowUpdate(
-          channel,
-          `Workflow \`${workflow.id}\` completed after ${workflow.stepCount + 1} step(s).`,
-        );
-        (this.options.log ?? console.log)(`[workflow] ${workflow.id} completed`);
+        if (completed?.status === "cancelled") {
+          this.updatesSent += await sendWorkflowUpdate(
+            channel,
+            `Workflow \`${workflow.id}\` stopped after the current step finished.`,
+          );
+          (this.options.log ?? console.log)(`[workflow] ${workflow.id} stopped after completion`);
+        } else {
+          this.updatesSent += await sendWorkflowUpdate(
+            channel,
+            `Workflow \`${workflow.id}\` completed after ${workflow.stepCount + 1} step(s).`,
+          );
+          (this.options.log ?? console.log)(`[workflow] ${workflow.id} completed`);
+        }
         return;
       }
 
@@ -1121,7 +1129,7 @@ export class BackgroundWorkflowRunner {
         return;
       }
 
-      await this.options.workflowService.markWaiting(workflow.id, {
+      const waiting = await this.options.workflowService.markWaiting(workflow.id, {
         nextRunAt: new Date(Date.now() + controlState.nextDelaySeconds * 1000),
         handoffSummary: controlState.summary,
         plan: controlState.plan,
@@ -1133,11 +1141,19 @@ export class BackgroundWorkflowRunner {
         clearPendingPrompts: true,
       });
       this.stepsCompleted += 1;
-      this.updatesSent += await sendWorkflowUpdate(
-        channel,
-        `Workflow \`${workflow.id}\` scheduled next step in ${controlState.nextDelaySeconds}s.`,
-      );
-      (this.options.log ?? console.log)(`[workflow] ${workflow.id} advanced to next step`);
+      if (waiting?.status === "cancelled") {
+        this.updatesSent += await sendWorkflowUpdate(
+          channel,
+          `Workflow \`${workflow.id}\` stopped after the current step finished.`,
+        );
+        (this.options.log ?? console.log)(`[workflow] ${workflow.id} stopped after current step`);
+      } else {
+        this.updatesSent += await sendWorkflowUpdate(
+          channel,
+          `Workflow \`${workflow.id}\` scheduled next step in ${controlState.nextDelaySeconds}s.`,
+        );
+        (this.options.log ?? console.log)(`[workflow] ${workflow.id} advanced to next step`);
+      }
     } catch (error) {
       const message = getErrorMessage(error);
       this.stepsFailed += 1;
