@@ -4,6 +4,7 @@ import type { SandboxMode } from "./config.js";
 
 export interface SessionRecord {
   threadId: string;
+  threadToolProfile?: string | null;
 }
 
 export type ReplyMode = "mentionOnly" | "auto";

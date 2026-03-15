@@ -49,6 +49,11 @@ export function summarizeToolItem(item: ToolItem): string | null {
     return `edit: ${paths.join(", ")}`;
   }
 
+  if (item.type === "dynamicToolCall") {
+    const tool = normalizeWhitespace(item.tool ?? "");
+    return tool ? `tool: ${tool}` : "tool: dynamic";
+  }
+
   return `tool: ${formatTypeLabel(item.type)}`;
 }
 

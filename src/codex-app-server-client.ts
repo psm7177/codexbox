@@ -5,6 +5,12 @@ import {
   type JsonRpcServerRequest,
 } from "./codex/jsonrpc-transport.js";
 import { buildAppServerEnv, type Config } from "./config.js";
+import {
+  executeDynamicToolCall,
+  getDynamicToolsForProvider,
+  type DynamicToolResponse,
+  type DynamicToolSpec,
+} from "./dynamic-tools.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -33,6 +39,8 @@ export interface ToolItem {
   type?: string;
   command?: string;
   changes?: Array<{ path: string }>;
+  tool?: string;
+  arguments?: Record<string, unknown>;
   path?: string;
   result?: string;
   status?: string;
@@ -67,6 +75,43 @@ interface EnsureThreadMetadata {
   cwd?: string;
   model?: string;
   modelProvider?: string;
+}
+
+export function createInitializeParams(config: Config): { clientInfo: Config["clientInfo"]; capabilities: { experimentalApi: boolean } } {
+  return {
+    clientInfo: config.clientInfo,
+    capabilities: {
+      experimentalApi: true,
+    },
+  };
+}
+
+export function createThreadStartParams(
+  config: Config,
+  metadata?: EnsureThreadMetadata,
+): {
+  cwd: string;
+  model?: string;
+  modelProvider?: string;
+  approvalPolicy: string;
+  personality: string;
+  serviceName: string;
+  dynamicTools?: DynamicToolSpec[];
+} {
+  const cwd = metadata?.cwd ?? config.threadDefaults.cwd;
+  const model = metadata?.model ?? config.threadDefaults.model;
+  const modelProvider = metadata?.modelProvider ?? config.threadDefaults.modelProvider;
+  const dynamicTools = getDynamicToolsForProvider(modelProvider);
+
+  return {
+    cwd,
+    model,
+    modelProvider,
+    approvalPolicy: config.threadDefaults.approvalPolicy,
+    personality: config.threadDefaults.personality,
+    serviceName: config.threadDefaults.serviceName,
+    ...(dynamicTools.length > 0 ? { dynamicTools } : {}),
+  };
 }
 
 function createDeferred<T>(): Deferred<T> {
@@ -142,7 +187,7 @@ export class CodexAppServerClient extends EventEmitter {
 
     try {
       await this.transport.start();
-      await this.transport.request("initialize", { clientInfo: this.config.clientInfo });
+      await this.transport.request("initialize", createInitializeParams(this.config));
       await this.transport.notify("initialized", {});
       deferred.resolve();
     } catch (error) {
@@ -175,14 +220,14 @@ export class CodexAppServerClient extends EventEmitter {
       }
     }
 
-    const response = (await this.request("thread/start", {
-      cwd,
-      model,
-      modelProvider,
-      approvalPolicy: this.config.threadDefaults.approvalPolicy,
-      personality: this.config.threadDefaults.personality,
-      serviceName: this.config.threadDefaults.serviceName,
-    })) as { thread: { id: string } };
+    const response = (await this.request(
+      "thread/start",
+      createThreadStartParams(this.config, {
+        cwd,
+        model,
+        modelProvider,
+      }),
+    )) as { thread: { id: string } };
 
     const threadId = response.thread.id;
     if (metadata?.name) {
@@ -277,6 +322,13 @@ export class CodexAppServerClient extends EventEmitter {
       const questions = (params?.questions as Array<{ id: string }> | undefined) ?? [];
       const answers = Object.fromEntries(questions.map((question) => [question.id, { answers: [] }]));
       return { answers };
+    }
+
+    if (method === "item/tool/call") {
+      return executeDynamicToolCall({
+        tool: typeof params?.tool === "string" ? params.tool : "",
+        arguments: (params?.arguments as Record<string, unknown> | undefined) ?? {},
+      }) as Promise<DynamicToolResponse>;
     }
 
     throw new JsonRpcRequestError(-32601, `Unsupported server request: ${method}`);

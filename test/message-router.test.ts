@@ -1489,3 +1489,114 @@ test("message router ignores bot-authored messages even in auto reply mode", asy
 
   assert.equal(runTurnCalled, false);
 });
+
+test("message router starts a new thread when ollama needs a web-search-capable session", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  await sessionStore.set("channel:guild-1:channel-1", { threadId: "thread-legacy" });
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const ensureThreadMetadata: Array<Record<string, unknown> | undefined> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread(metadata) {
+        ensureThreadMetadata.push(metadata as Record<string, unknown> | undefined);
+        return "thread-ollama";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {},
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(createMessage());
+
+  assert.equal(ensureThreadMetadata[0]?.threadId, undefined);
+  assert.deepEqual(conversationService.getSession("channel:guild-1:channel-1"), {
+    threadId: "thread-ollama",
+    threadToolProfile: "ollama-web-search-v1",
+  });
+});
+
+test("message router reuses an ollama thread when the tool profile already matches", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  await sessionStore.set("channel:guild-1:channel-1", {
+    threadId: "thread-ollama",
+    threadToolProfile: "ollama-web-search-v1",
+  });
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const ensureThreadMetadata: Array<Record<string, unknown> | undefined> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread(metadata) {
+        ensureThreadMetadata.push(metadata as Record<string, unknown> | undefined);
+        return "thread-ollama";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async () => {},
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(createMessage());
+
+  assert.equal(ensureThreadMetadata[0]?.threadId, "thread-ollama");
+  assert.deepEqual(conversationService.getSession("channel:guild-1:channel-1"), {
+    threadId: "thread-ollama",
+    threadToolProfile: "ollama-web-search-v1",
+  });
+});

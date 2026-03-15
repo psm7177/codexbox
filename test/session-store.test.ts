@@ -11,12 +11,12 @@ test("session store persists sessions", async () => {
   const store = new SessionStore(storePath);
 
   await store.load();
-  await store.set("channel:1", { threadId: "thr_123" });
+  await store.set("channel:1", { threadId: "thr_123", threadToolProfile: "ollama-web-search-v1" });
 
   const reloaded = new SessionStore(storePath);
   await reloaded.load();
 
-  assert.deepEqual(reloaded.get("channel:1"), { threadId: "thr_123" });
+  assert.deepEqual(reloaded.get("channel:1"), { threadId: "thr_123", threadToolProfile: "ollama-web-search-v1" });
 });
 
 test("session store persists workspace mappings", async () => {

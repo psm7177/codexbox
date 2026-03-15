@@ -19,6 +19,7 @@ import { ActiveTurnRegistry, type ActiveTurnRegistry as ActiveTurnRegistryType }
 import type { RestartCoordinator } from "../lifecycle/restart-coordinator.js";
 import type { ConversationService } from "../state/conversation-service.js";
 import type { WorkspaceService } from "../state/workspace-service.js";
+import { getDynamicToolProfile } from "../dynamic-tools.js";
 import { runCodexTurn } from "./turn-runner.js";
 
 type CommandHandler = (message: Message, args: string[]) => Promise<void>;
@@ -195,16 +196,25 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
 
       let session = options.conversationService.getSession(conversationKey);
       try {
+        const requiredThreadToolProfile = getDynamicToolProfile(modelProvider);
+        const reusableThreadId =
+          (session?.threadToolProfile ?? null) === requiredThreadToolProfile ? session?.threadId : undefined;
         const threadId = await options.codexClient.ensureThread({
-          threadId: session?.threadId,
+          threadId: reusableThreadId,
           name: getThreadDisplayName(message),
           cwd,
           model,
           modelProvider,
         });
 
-        if (!session || session.threadId !== threadId) {
-          session = await options.conversationService.saveThread(conversationKey, threadId);
+        if (
+          !session ||
+          session.threadId !== threadId ||
+          (session.threadToolProfile ?? null) !== requiredThreadToolProfile
+        ) {
+          session = await options.conversationService.saveThread(conversationKey, threadId, {
+            threadToolProfile: requiredThreadToolProfile,
+          });
         }
 
         await runTurn({

@@ -21,6 +21,16 @@ test("summarizeToolItem ignores agent and user message items", () => {
   assert.equal(summarizeToolItem({ type: "userMessage" }), null);
 });
 
+test("summarizeToolItem formats dynamic tool calls compactly", () => {
+  assert.equal(
+    summarizeToolItem({
+      type: "dynamicToolCall",
+      tool: "web_search",
+    }),
+    "tool: web_search",
+  );
+});
+
 test("formatProgressMessage shows active, used, and preview sections", () => {
   const progress = formatProgressMessage({
     isWriting: false,
