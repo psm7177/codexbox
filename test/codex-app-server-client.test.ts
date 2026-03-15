@@ -17,6 +17,15 @@ function createConfig(workspace: string): Config {
     sandboxMode: "workspaceWrite",
     sandboxNetworkAccess: false,
     sessionStorePath: `${workspace}/.data/sessions.json`,
+    workflowDefaults: {
+      storePath: `${workspace}/.data/workflows.json`,
+      artifactsPath: `${workspace}/.data/workflows`,
+      pollIntervalMs: 15_000,
+      retryBaseDelayMs: 60_000,
+      retryMaxDelayMs: 3_600_000,
+      maxFailures: 5,
+      reuseConversationThread: false,
+    },
     appServerCommand: {
       bin: "codex",
       args: ["app-server", "--listen", "stdio://"],
