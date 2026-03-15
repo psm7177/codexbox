@@ -128,10 +128,29 @@ export function splitDiscordMessage(text: string, maxLength = 1900): string[] {
     return [];
   }
 
+  const findSentenceBoundary = (value: string, limit: number): number => {
+    const punctuation = new Set([".", "!", "?", "。", "！", "？"]);
+    for (let index = Math.min(limit - 1, value.length - 1); index >= Math.floor(limit / 2); index -= 1) {
+      if (!punctuation.has(value[index] ?? "")) {
+        continue;
+      }
+
+      const nextChar = value[index + 1] ?? "";
+      if (!nextChar || /\s|["')\]]/.test(nextChar)) {
+        return index + 1;
+      }
+    }
+
+    return -1;
+  };
+
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > maxLength) {
-    let splitIndex = remaining.lastIndexOf("\n", maxLength);
+    let splitIndex = findSentenceBoundary(remaining, maxLength);
+    if (splitIndex < Math.floor(maxLength / 2)) {
+      splitIndex = remaining.lastIndexOf("\n", maxLength);
+    }
     if (splitIndex < Math.floor(maxLength / 2)) {
       splitIndex = remaining.lastIndexOf(" ", maxLength);
     }

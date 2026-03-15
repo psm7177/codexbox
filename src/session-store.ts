@@ -8,12 +8,27 @@ export interface SessionRecord {
 
 export type ReplyMode = "mentionOnly" | "auto";
 
+function normalizeSelectionValue(value: string | null | undefined): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "default") {
+    return null;
+  }
+
+  return trimmed;
+}
+
 interface SessionStoreFile {
   sessions?: Record<string, SessionRecord>;
   workspaces?: Record<string, string>;
   workspaceNetworkAccess?: Record<string, boolean>;
   workspaceSandboxModes?: Record<string, SandboxMode>;
   workspaceReplyModes?: Record<string, ReplyMode>;
+  workspaceModels?: Record<string, string>;
+  workspaceModelProviders?: Record<string, string>;
 }
 
 export class SessionStore {
@@ -23,6 +38,8 @@ export class SessionStore {
   private workspaceNetworkAccess: Record<string, boolean>;
   private workspaceSandboxModes: Record<string, SandboxMode>;
   private workspaceReplyModes: Record<string, ReplyMode>;
+  private workspaceModels: Record<string, string>;
+  private workspaceModelProviders: Record<string, string>;
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -31,6 +48,8 @@ export class SessionStore {
     this.workspaceNetworkAccess = {};
     this.workspaceSandboxModes = {};
     this.workspaceReplyModes = {};
+    this.workspaceModels = {};
+    this.workspaceModelProviders = {};
   }
 
   async load(): Promise<void> {
@@ -42,6 +61,8 @@ export class SessionStore {
       this.workspaceNetworkAccess = parsed.workspaceNetworkAccess ?? {};
       this.workspaceSandboxModes = parsed.workspaceSandboxModes ?? {};
       this.workspaceReplyModes = parsed.workspaceReplyModes ?? {};
+      this.workspaceModels = parsed.workspaceModels ?? {};
+      this.workspaceModelProviders = parsed.workspaceModelProviders ?? {};
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "ENOENT") {
@@ -52,6 +73,8 @@ export class SessionStore {
       this.workspaceNetworkAccess = {};
       this.workspaceSandboxModes = {};
       this.workspaceReplyModes = {};
+      this.workspaceModels = {};
+      this.workspaceModelProviders = {};
     }
   }
 
@@ -129,6 +152,44 @@ export class SessionStore {
     await this.save();
   }
 
+  getWorkspaceModel(workspaceKey: string): string | null {
+    return normalizeSelectionValue(this.workspaceModels[workspaceKey]);
+  }
+
+  async setWorkspaceModel(workspaceKey: string, model: string): Promise<void> {
+    const normalized = normalizeSelectionValue(model);
+    if (normalized == null) {
+      delete this.workspaceModels[workspaceKey];
+    } else {
+      this.workspaceModels[workspaceKey] = normalized;
+    }
+    await this.save();
+  }
+
+  async deleteWorkspaceModel(workspaceKey: string): Promise<void> {
+    delete this.workspaceModels[workspaceKey];
+    await this.save();
+  }
+
+  getWorkspaceModelProvider(workspaceKey: string): string | null {
+    return normalizeSelectionValue(this.workspaceModelProviders[workspaceKey]);
+  }
+
+  async setWorkspaceModelProvider(workspaceKey: string, provider: string): Promise<void> {
+    const normalized = normalizeSelectionValue(provider);
+    if (normalized == null) {
+      delete this.workspaceModelProviders[workspaceKey];
+    } else {
+      this.workspaceModelProviders[workspaceKey] = normalized;
+    }
+    await this.save();
+  }
+
+  async deleteWorkspaceModelProvider(workspaceKey: string): Promise<void> {
+    delete this.workspaceModelProviders[workspaceKey];
+    await this.save();
+  }
+
   private async save(): Promise<void> {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     await fs.writeFile(
@@ -140,6 +201,8 @@ export class SessionStore {
           workspaceNetworkAccess: this.workspaceNetworkAccess,
           workspaceSandboxModes: this.workspaceSandboxModes,
           workspaceReplyModes: this.workspaceReplyModes,
+          workspaceModels: this.workspaceModels,
+          workspaceModelProviders: this.workspaceModelProviders,
         },
         null,
         2,

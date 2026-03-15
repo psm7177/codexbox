@@ -74,3 +74,42 @@ test("session store persists workspace reply mode", async () => {
 
   assert.equal(reloaded.getWorkspaceReplyMode("channel:guild:parent"), "auto");
 });
+
+test("session store persists workspace model selection", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
+  const storePath = path.join(tempDir, "sessions.json");
+  const store = new SessionStore(storePath);
+
+  await store.load();
+  await store.setWorkspaceModel("channel:guild:parent", "gpt-oss:120b");
+  await store.setWorkspaceModelProvider("channel:guild:parent", "ollama");
+
+  const reloaded = new SessionStore(storePath);
+  await reloaded.load();
+
+  assert.equal(reloaded.getWorkspaceModel("channel:guild:parent"), "gpt-oss:120b");
+  assert.equal(reloaded.getWorkspaceModelProvider("channel:guild:parent"), "ollama");
+});
+
+test("session store treats default model and provider sentinels as unset", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codexbox-"));
+  const storePath = path.join(tempDir, "sessions.json");
+  await fs.writeFile(
+    storePath,
+    JSON.stringify({
+      workspaceModels: {
+        "channel:guild:parent": "default",
+      },
+      workspaceModelProviders: {
+        "channel:guild:parent": "default",
+      },
+    }),
+    "utf8",
+  );
+
+  const reloaded = new SessionStore(storePath);
+  await reloaded.load();
+
+  assert.equal(reloaded.getWorkspaceModel("channel:guild:parent"), null);
+  assert.equal(reloaded.getWorkspaceModelProvider("channel:guild:parent"), null);
+});

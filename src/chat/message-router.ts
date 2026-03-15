@@ -51,6 +51,21 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function getRateLimitHint(error: unknown, workspaceService: WorkspaceService, workspaceKey: string): string {
+  const message = getErrorMessage(error);
+  if (!/429 Too Many Requests/i.test(message)) {
+    return "";
+  }
+
+  const provider = workspaceService.getModelProvider(workspaceKey);
+  const model = workspaceService.getModel(workspaceKey);
+  if (provider !== "ollama" || !model || !/cloud/i.test(model)) {
+    return "";
+  }
+
+  return `\nHint: selected model \`${model}\` is cloud-backed, so it can still hit Ollama Cloud rate limits. Use \`!codex model\` to switch to a local Ollama model.`;
+}
+
 function describeMessageSource(message: Message): string {
   if (!message.inGuild()) {
     return `dm:${message.author.username}`;
@@ -141,6 +156,8 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       }
 
       const cwd = options.workspaceService.getCwd(workspaceKey);
+      const model = options.workspaceService.getModel(workspaceKey);
+      const modelProvider = options.workspaceService.getModelProvider(workspaceKey);
       const sandboxMode = options.workspaceService.getSandboxMode(workspaceKey);
       const networkAccess = options.workspaceService.getNetworkAccess(workspaceKey);
       const sandboxPolicy = buildSandboxPolicy(sandboxMode, networkAccess, cwd);
@@ -182,6 +199,8 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
           threadId: session?.threadId,
           name: getThreadDisplayName(message),
           cwd,
+          model,
+          modelProvider,
         });
 
         if (!session || session.threadId !== threadId) {
@@ -194,6 +213,7 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
           threadId,
           inputs,
           cwd,
+          model,
           codexWorkspace: options.config.codexWorkspace,
           sandboxPolicy,
           codexClient: options.codexClient,
@@ -231,7 +251,9 @@ export function createMessageCreateHandler(options: MessageRouterOptions): (mess
       errorLog(`[discord][${record.id}] ${record.detail}`);
       if (message.channel?.isSendable?.()) {
         const isAdmin = options.config.restartAdminUserIds.includes(message.author.id);
-        await message.reply(formatBridgeErrorReply(record.id, record.summary, isAdmin));
+        const workspaceKey = getWorkspaceKey(message);
+        const summary = `${record.summary}${getRateLimitHint(error, options.workspaceService, workspaceKey)}`;
+        await message.reply(formatBridgeErrorReply(record.id, summary, isAdmin));
       }
     }
   };

@@ -69,12 +69,16 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
     const session = context.conversationService.getSession(conversationKey);
     const workspaceRoot = context.config.codexWorkspace;
     const cwd = context.workspaceService.getCwd(workspaceKey);
+    const modelOverride = context.workspaceService.getModelOverride(workspaceKey);
+    const providerOverride = context.workspaceService.getModelProviderOverride(workspaceKey);
     const sandboxMode = context.workspaceService.getSandboxMode(workspaceKey);
     const networkAccess = context.workspaceService.getNetworkAccess(workspaceKey);
     const replyMode = context.workspaceService.getReplyMode(workspaceKey) === "auto" ? "auto" : "mention";
 
-    let model = context.config.threadDefaults.model ?? "default";
-    let modelProvider = context.config.threadDefaults.modelProvider ?? "default";
+    const selectedModel = context.workspaceService.getModel(workspaceKey) ?? "default";
+    const selectedProvider = context.workspaceService.getModelProvider(workspaceKey) ?? "default";
+    let threadModel = selectedModel;
+    let threadProvider = selectedProvider;
     let threadStatus = "not bound";
     let authMode = "unknown";
     let accountLabel = "not signed in";
@@ -92,8 +96,8 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
           model_provider?: string | null;
         };
       };
-      model = configResponse.config?.model ?? model;
-      modelProvider = configResponse.config?.model_provider ?? modelProvider;
+      threadModel = configResponse.config?.model ?? threadModel;
+      threadProvider = configResponse.config?.model_provider ?? threadProvider;
     } catch {
       // Keep configured defaults when app-server status cannot be read.
     }
@@ -140,8 +144,8 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
           };
         };
         threadStatus = threadResponse.thread?.status?.type ?? "unknown";
-        model = threadResponse.thread?.model ?? model;
-        modelProvider = threadResponse.thread?.modelProvider ?? modelProvider;
+        threadModel = threadResponse.thread?.model ?? threadModel;
+        threadProvider = threadResponse.thread?.modelProvider ?? threadProvider;
       } catch {
         threadStatus = "unavailable";
       }
@@ -153,8 +157,10 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
       `reply mode: \`${replyMode}\``,
       `access: \`${formatSandboxMode(sandboxMode)}\``,
       `network: \`${formatNetworkAccess(networkAccess)}\``,
-      `model: \`${model}\``,
-      `provider: \`${modelProvider}\``,
+      `selected model: \`${selectedModel}\``,
+      `selected provider: \`${selectedProvider}\``,
+      `model override: \`${modelOverride ?? "none"}\``,
+      `provider override: \`${providerOverride ?? "none"}\``,
       `auth mode: \`${authMode}\``,
       `account: \`${accountLabel}\``,
       `plan: \`${planLabel}\``,
@@ -170,6 +176,8 @@ export function createStatusCommand(context: CommandContext): CommandHandler {
 
     lines.push(`thread: \`${session.threadId}\``);
     lines.push(`thread status: \`${threadStatus}\``);
+    lines.push(`thread model: \`${threadModel}\``);
+    lines.push(`thread provider: \`${threadProvider}\``);
     await message.reply(lines.join("\n"));
   };
 }

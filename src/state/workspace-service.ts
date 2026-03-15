@@ -26,11 +26,17 @@ export class WorkspaceService {
     | "getWorkspaceSandboxMode"
     | "setWorkspaceSandboxMode"
     | "deleteWorkspaceSandboxMode"
-    | "getWorkspaceReplyMode"
-    | "setWorkspaceReplyMode"
-    | "deleteWorkspaceReplyMode"
+      | "getWorkspaceReplyMode"
+      | "setWorkspaceReplyMode"
+      | "deleteWorkspaceReplyMode"
+      | "getWorkspaceModel"
+      | "setWorkspaceModel"
+      | "deleteWorkspaceModel"
+      | "getWorkspaceModelProvider"
+      | "setWorkspaceModelProvider"
+      | "deleteWorkspaceModelProvider"
   >;
-  private readonly defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess">;
+  private readonly defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess" | "threadDefaults">;
 
   constructor(
     store: Pick<
@@ -47,8 +53,14 @@ export class WorkspaceService {
       | "getWorkspaceReplyMode"
       | "setWorkspaceReplyMode"
       | "deleteWorkspaceReplyMode"
+      | "getWorkspaceModel"
+      | "setWorkspaceModel"
+      | "deleteWorkspaceModel"
+      | "getWorkspaceModelProvider"
+      | "setWorkspaceModelProvider"
+      | "deleteWorkspaceModelProvider"
     >,
-    defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess">,
+    defaults: Pick<Config, "codexWorkspace" | "sandboxMode" | "sandboxNetworkAccess" | "threadDefaults">,
   ) {
     this.store = store;
     this.defaults = defaults;
@@ -111,5 +123,45 @@ export class WorkspaceService {
 
   async resetReplyMode(workspaceKey: string): Promise<void> {
     await this.store.deleteWorkspaceReplyMode(workspaceKey);
+  }
+
+  getModelOverride(workspaceKey: string): string | null {
+    return this.store.getWorkspaceModel(workspaceKey);
+  }
+
+  getModel(workspaceKey: string): string | undefined {
+    return this.store.getWorkspaceModel(workspaceKey) ?? this.defaults.threadDefaults.model;
+  }
+
+  async setModel(workspaceKey: string, model: string): Promise<void> {
+    await this.store.setWorkspaceModel(workspaceKey, model.trim());
+  }
+
+  async resetModel(workspaceKey: string): Promise<void> {
+    await this.store.deleteWorkspaceModel(workspaceKey);
+  }
+
+  getModelProviderOverride(workspaceKey: string): string | null {
+    return this.store.getWorkspaceModelProvider(workspaceKey);
+  }
+
+  getModelProvider(workspaceKey: string): string | undefined {
+    return this.store.getWorkspaceModelProvider(workspaceKey) ?? this.defaults.threadDefaults.modelProvider;
+  }
+
+  async setModelProvider(workspaceKey: string, provider: string): Promise<void> {
+    const previousProvider = this.getModelProvider(workspaceKey);
+    await this.store.setWorkspaceModelProvider(workspaceKey, provider.trim());
+    if (previousProvider !== this.getModelProvider(workspaceKey)) {
+      await this.store.deleteWorkspaceModel(workspaceKey);
+    }
+  }
+
+  async resetModelProvider(workspaceKey: string): Promise<void> {
+    const previousProvider = this.getModelProvider(workspaceKey);
+    await this.store.deleteWorkspaceModelProvider(workspaceKey);
+    if (previousProvider !== this.getModelProvider(workspaceKey)) {
+      await this.store.deleteWorkspaceModel(workspaceKey);
+    }
   }
 }

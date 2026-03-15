@@ -61,6 +61,14 @@ export interface TurnResult {
   };
 }
 
+interface EnsureThreadMetadata {
+  threadId?: string;
+  name?: string;
+  cwd?: string;
+  model?: string;
+  modelProvider?: string;
+}
+
 function createDeferred<T>(): Deferred<T> {
   let resolve!: Deferred<T>["resolve"];
   let reject!: Deferred<T>["reject"];
@@ -146,14 +154,18 @@ export class CodexAppServerClient extends EventEmitter {
     return this.readyPromise;
   }
 
-  async ensureThread(metadata?: { threadId?: string; name?: string; cwd?: string }): Promise<string> {
+  async ensureThread(metadata?: EnsureThreadMetadata): Promise<string> {
     await this.ensureStarted();
     const cwd = metadata?.cwd ?? this.config.threadDefaults.cwd;
+    const model = metadata?.model ?? this.config.threadDefaults.model;
+    const modelProvider = metadata?.modelProvider ?? this.config.threadDefaults.modelProvider;
     if (metadata?.threadId) {
       try {
         await this.request("thread/resume", {
           threadId: metadata.threadId,
           cwd,
+          model,
+          modelProvider,
           approvalPolicy: this.config.threadDefaults.approvalPolicy,
           personality: this.config.threadDefaults.personality,
         });
@@ -165,8 +177,8 @@ export class CodexAppServerClient extends EventEmitter {
 
     const response = (await this.request("thread/start", {
       cwd,
-      model: this.config.threadDefaults.model,
-      modelProvider: this.config.threadDefaults.modelProvider,
+      model,
+      modelProvider,
       approvalPolicy: this.config.threadDefaults.approvalPolicy,
       personality: this.config.threadDefaults.personality,
       serviceName: this.config.threadDefaults.serviceName,
@@ -186,6 +198,7 @@ export class CodexAppServerClient extends EventEmitter {
     threadId,
     inputs,
     cwd,
+    model,
     sandboxPolicy,
     onDelta,
     onPlan,
@@ -195,6 +208,7 @@ export class CodexAppServerClient extends EventEmitter {
     threadId: string;
     inputs: CodexUserInput[];
     cwd?: string;
+    model?: string;
     sandboxPolicy?: Config["turnDefaults"]["sandboxPolicy"];
     onDelta?: PendingTurn["onDelta"];
     onPlan?: PendingTurn["onPlan"];
@@ -209,7 +223,7 @@ export class CodexAppServerClient extends EventEmitter {
       threadId,
       input: inputs,
       cwd: resolvedCwd,
-      model: this.config.turnDefaults.model,
+      model: model ?? this.config.turnDefaults.model,
       approvalPolicy: this.config.turnDefaults.approvalPolicy,
       personality: this.config.turnDefaults.personality,
       summary: this.config.turnDefaults.summary,

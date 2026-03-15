@@ -40,12 +40,15 @@ function createConfig(workspace: string): Config {
     },
     threadDefaults: {
       cwd: workspace,
+      model: "gpt-test",
+      modelProvider: "openai",
       personality: "pragmatic",
       approvalPolicy: "never",
       serviceName: "codexbox",
     },
     turnDefaults: {
       cwd: workspace,
+      model: "gpt-test",
       personality: "pragmatic",
       approvalPolicy: "never",
       summary: "concise",
@@ -139,6 +142,16 @@ function createCodexRequestStub() {
         config: {
           model: "gpt-test",
           model_provider: "openai",
+          model_providers: {
+            ollama: {
+              name: "Ollama Cloud",
+              base_url: "https://ollama.com/v1",
+            },
+            custom_provider: {
+              name: "Custom Provider",
+              base_url: "https://custom.example/v1",
+            },
+          },
         },
       };
     }
@@ -186,6 +199,15 @@ function createCodexRequestStub() {
             },
           },
         },
+      };
+    }
+
+    if (method === "model/list") {
+      return {
+        data: [
+          { displayName: "GPT OSS 120B", model: "gpt-oss:120b", id: "gpt-oss:120b", hidden: false },
+          { displayName: "GPT-5.4", model: "gpt-5.4", id: "gpt-5.4", hidden: false },
+        ],
       };
     }
 
@@ -254,8 +276,10 @@ test("message router routes commands to command handlers", async () => {
   assert.equal(runTurnCalled, false);
   assert.match(replies[0] ?? "", new RegExp(`workspace: \`${config.codexWorkspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\``));
   assert.match(replies[0] ?? "", /cwd: `.*`/);
-  assert.match(replies[0] ?? "", /model: `gpt-test`/);
-  assert.match(replies[0] ?? "", /provider: `openai`/);
+  assert.match(replies[0] ?? "", /selected model: `gpt-test`/);
+  assert.match(replies[0] ?? "", /selected provider: `openai`/);
+  assert.match(replies[0] ?? "", /model override: `none`/);
+  assert.match(replies[0] ?? "", /provider override: `none`/);
   assert.match(replies[0] ?? "", /auth mode: `chatgpt`/);
   assert.match(replies[0] ?? "", /account: `user@example\.com`/);
   assert.match(replies[0] ?? "", /plan: `pro`/);
@@ -263,6 +287,452 @@ test("message router routes commands to command handlers", async () => {
   assert.match(replies[0] ?? "", /usage:/);
   assert.match(replies[0] ?? "", /codex: `75% remaining`/);
   assert.match(replies[0] ?? "", /No Codex session is mapped to this conversation yet\./);
+});
+
+test("message router lists models through the models command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for model listing");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for model listing");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex models",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /Available models:/);
+  assert.match(replies[0] ?? "", /GPT OSS 120B `gpt-oss:120b`/);
+});
+
+test("message router lists providers through the providers command", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "custom_provider");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for provider listing");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for provider listing");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex providers",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /Available providers:/);
+  assert.match(replies[0] ?? "", /openai \[built-in\]/);
+  assert.match(replies[0] ?? "", /ollama \[config override\]/);
+  assert.match(replies[0] ?? "", /lmstudio \[built-in\]/);
+  assert.match(replies[0] ?? "", /custom_provider \[selected\] \[custom\]/);
+  assert.doesNotMatch(replies[0] ?? "", /7697a44cee054c0eb8f7094ac46da884/);
+});
+
+test("message router loads Ollama model tags for !codex model when provider is ollama", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        models: [{ name: "gpt-oss:20b" }, { name: "gpt-oss:120b-cloud" }],
+      }),
+    }) as Response) as typeof fetch;
+
+  try {
+    const handler = createMessageCreateHandler({
+      config,
+      conversationService,
+      restartCoordinator,
+      workspaceService,
+      codexClient: {
+        async ensureThread() {
+          throw new Error("ensureThread should not be called for model status");
+        },
+        async startTurn() {
+          throw new Error("startTurn should not be called for model status");
+        },
+      },
+      commandHandlers,
+      errorTracker,
+      getBotUserId: () => "bot-1",
+      log: () => {},
+      errorLog: () => {},
+    });
+
+    await handler(
+      createMessage({
+        content: "<@bot-1> !codex model",
+        reply: async (content: string) => {
+          replies.push(content);
+          return undefined;
+        },
+      }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /selected provider: `ollama`/);
+  assert.match(replies[0] ?? "", /ollama models:/);
+  assert.match(replies[0] ?? "", /gpt-oss:20b/);
+  assert.match(replies[0] ?? "", /gpt-oss:120b-cloud/);
+});
+
+test("message router keeps the bound session when only the model changes", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  await conversationService.saveThread("dm:user-1", "thread-123");
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for model selection");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for model selection");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex model qwen3.5:397b-cloud",
+      channelId: "user-1",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.deepEqual(conversationService.getSession("dm:user-1"), { threadId: "thread-123" });
+  assert.doesNotMatch(replies[0] ?? "", /Session reset\. The next message starts a new Codex thread\./);
+});
+
+test("message router resets the bound session when the provider changes", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  await conversationService.saveThread("dm:user-1", "thread-123");
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for provider selection");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for provider selection");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex provider ollama gpt-oss:120b-cloud",
+      channelId: "user-1",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(conversationService.getSession("dm:user-1"), null);
+  assert.match(replies[0] ?? "", /Session reset\. The next message starts a new Codex thread\./);
+});
+
+test("message router clears the selected model when the provider changes without an explicit model", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModel("dm:user-1", "qwen3.5:397b-cloud");
+  const conversationService = new ConversationService(sessionStore);
+  await conversationService.saveThread("dm:user-1", "thread-123");
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("ensureThread should not be called for provider selection");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called for provider selection");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> !codex provider ollama",
+      channelId: "user-1",
+      guildId: null,
+      guild: null,
+      inGuild: () => false,
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(workspaceService.getModelOverride("dm:user-1"), null);
+  assert.equal(workspaceService.getModel("dm:user-1"), "gpt-test");
+  assert.equal(workspaceService.getModelProvider("dm:user-1"), "ollama");
+  assert.match(replies[0] ?? "", /selected model: `gpt-test`/);
+  assert.match(replies[0] ?? "", /Session reset\. The next message starts a new Codex thread\./);
+});
+
+test("message router loads Ollama model tags for !codex models when provider is ollama", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        models: [{ name: "gpt-oss:20b" }, { name: "gpt-oss:120b-cloud" }],
+      }),
+    }) as Response) as typeof fetch;
+
+  try {
+    const handler = createMessageCreateHandler({
+      config,
+      conversationService,
+      restartCoordinator,
+      workspaceService,
+      codexClient: {
+        async ensureThread() {
+          throw new Error("ensureThread should not be called for models listing");
+        },
+        async startTurn() {
+          throw new Error("startTurn should not be called for models listing");
+        },
+      },
+      commandHandlers,
+      errorTracker,
+      getBotUserId: () => "bot-1",
+      log: () => {},
+      errorLog: () => {},
+    });
+
+    await handler(
+      createMessage({
+        content: "<@bot-1> !codex models",
+        reply: async (content: string) => {
+          replies.push(content);
+          return undefined;
+        },
+      }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /Available models:/);
+  assert.match(replies[0] ?? "", /GPT OSS 120B `gpt-oss:120b`/);
+  assert.match(replies[0] ?? "", /Ollama models:/);
+  assert.match(replies[0] ?? "", /gpt-oss:20b/);
+  assert.match(replies[0] ?? "", /gpt-oss:120b-cloud/);
 });
 
 test("message router resolves workspace and runs a Codex turn for chat messages", async () => {
@@ -402,6 +872,67 @@ test("message router expands local file references before starting a turn", asyn
   assert.equal(calls[0]?.inputs[0]?.type, "text");
   assert.match(calls[0]?.inputs[0]?.text ?? "", /\[Local file: .*auth-example\.txt\]/);
   assert.match(calls[0]?.inputs[0]?.text ?? "", /token auth example/);
+});
+
+test("message router passes selected model and provider overrides to Codex thread and turn startup", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModel("channel:guild-1:channel-1", "gpt-oss:120b");
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const ensureThreadCalls: Array<{ model?: string; modelProvider?: string }> = [];
+  const runTurnCalls: Array<{ model?: string }> = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread(metadata) {
+        ensureThreadCalls.push({
+          model: metadata?.model,
+          modelProvider: metadata?.modelProvider,
+        });
+        return "thread-123";
+      },
+      async startTurn() {
+        throw new Error("startTurn should be stubbed by runTurn");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    runTurn: async (options) => {
+      runTurnCalls.push({ model: options.model });
+    },
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> use the selected model",
+    }),
+  );
+
+  assert.deepEqual(ensureThreadCalls, [{ model: "gpt-oss:120b", modelProvider: "ollama" }]);
+  assert.deepEqual(runTurnCalls, [{ model: "gpt-oss:120b" }]);
 });
 
 test("message router downloads Discord attachments into /tmp and injects text attachments", async () => {
@@ -716,6 +1247,65 @@ test("message router returns an error reference and logs detail", async () => {
   assert.equal(errorLogs.length, 1);
   assert.match(errorLogs[0] ?? "", /\[discord\]\[err-/);
   assert.match(errorLogs[0] ?? "", /x{50}/);
+});
+
+test("message router adds an Ollama cloud hint for 429 errors", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  await sessionStore.setWorkspaceModel("channel:guild-1:channel-1", "qwen3.5:397b-cloud");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const replies: string[] = [];
+  const handler = createMessageCreateHandler({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      async ensureThread() {
+        throw new Error("exceeded retry limit, last status: 429 Too Many Requests");
+      },
+      async startTurn() {
+        throw new Error("startTurn should not be called");
+      },
+    },
+    commandHandlers,
+    errorTracker,
+    getBotUserId: () => "bot-1",
+    log: () => {},
+    errorLog: () => {},
+  });
+
+  await handler(
+    createMessage({
+      content: "<@bot-1> hi",
+      reply: async (content: string) => {
+        replies.push(content);
+        return undefined;
+      },
+    }),
+  );
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /429 Too Many Requests/);
+  assert.match(replies[0] ?? "", /selected model `qwen3\.5:397b-cloud` is cloud-backed/);
+  assert.match(replies[0] ?? "", /Use `!codex model` to switch to a local Ollama model/);
 });
 
 test("workspace command updates CODEX_WORKSPACE in the env file for admins", async () => {

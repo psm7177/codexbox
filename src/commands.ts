@@ -4,8 +4,12 @@ import { createCwdCommand } from "./commands/cwd.js";
 import { createErrorCommand } from "./commands/error.js";
 import { createHelpCommand } from "./commands/help.js";
 import { createInitCommand } from "./commands/init.js";
+import { createModelCommand } from "./commands/model.js";
+import { createModelsCommand } from "./commands/models.js";
 import { createModeCommand } from "./commands/mode.js";
 import { createNetworkCommand } from "./commands/network.js";
+import { createProviderCommand } from "./commands/provider.js";
+import { createProvidersCommand } from "./commands/providers.js";
 import { createResetCommand } from "./commands/reset.js";
 import { createRestartCommand } from "./commands/restart.js";
 import { createSessionsCommand } from "./commands/sessions.js";
@@ -31,6 +35,10 @@ export function createCommandHandlers(context: CommandContext): Record<string, C
   return {
     help: createHelpCommand(),
     status: createStatusCommand(context),
+    models: createModelsCommand(context),
+    providers: createProvidersCommand(context),
+    model: createModelCommand(context),
+    provider: createProviderCommand(context),
     stop: createStopCommand(context),
     sessions: createSessionsCommand(context),
     bind: createBindCommand(context),
