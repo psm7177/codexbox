@@ -39,11 +39,32 @@ if [[ -z "$DISCORD_TOKEN_VALUE" ]]; then
   DISCORD_TOKEN_VALUE="$(get_env_value 'DISCORD_TOKEN')"
 fi
 if [[ -z "$DISCORD_TOKEN_VALUE" ]]; then
-  DISCORD_TOKEN_VALUE="$(prompt_value 'Discord bot token: ')"
+  DISCORD_TOKEN_VALUE="$(prompt_value 'Discord bot token: ' 'DISCORD_TOKEN')"
+fi
+
+INSTALLER_USER="${SUDO_USER:-$(id -un)}"
+INSTALLER_HOME="$(resolve_user_home "$INSTALLER_USER")"
+if [[ -z "$INSTALLER_HOME" ]]; then
+  INSTALLER_HOME="${HOME:-}"
+fi
+if [[ -z "$INSTALLER_HOME" ]]; then
+  echo "Unable to resolve installer home directory for user: $INSTALLER_USER" >&2
+  exit 1
+fi
+
+DISCORD_ADMIN_IDS_VALUE="${DISCORD_RESTART_ADMIN_USER_IDS:-}"
+if [[ -z "$DISCORD_ADMIN_IDS_VALUE" ]]; then
+  DISCORD_ADMIN_IDS_VALUE="$(get_env_value 'DISCORD_RESTART_ADMIN_USER_IDS')"
+fi
+if [[ -z "$DISCORD_ADMIN_IDS_VALUE" ]]; then
+  DISCORD_ADMIN_IDS_VALUE="$(
+    prompt_value 'Discord admin user ID(s), comma-separated: ' 'DISCORD_RESTART_ADMIN_USER_IDS'
+  )"
 fi
 
 set_env_value "DISCORD_TOKEN" "$DISCORD_TOKEN_VALUE"
-set_env_value "CODEX_WORKSPACE" "."
+set_env_value "DISCORD_RESTART_ADMIN_USER_IDS" "$DISCORD_ADMIN_IDS_VALUE"
+set_env_value "CODEX_WORKSPACE" "$INSTALLER_HOME"
 
 echo "Building project..."
 npm run build
