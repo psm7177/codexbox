@@ -203,7 +203,7 @@ export function loadConfig(): Config {
   return {
     discordToken: process.env.DISCORD_TOKEN ?? "",
     discordClientId: process.env.DISCORD_CLIENT_ID ?? "",
-    discordMessageContentIntent: parseBoolean(process.env.DISCORD_MESSAGE_CONTENT_INTENT, false),
+    discordMessageContentIntent: parseBoolean(process.env.DISCORD_MESSAGE_CONTENT_INTENT, true),
     discordAllowedUserIds,
     discordAllowedGuildIds,
     discordAllowedChannelIds,
