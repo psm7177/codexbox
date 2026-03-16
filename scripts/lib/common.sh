@@ -18,6 +18,7 @@ is_truthy() {
 
 prompt_value() {
   local prompt="$1"
+  local required_env="${2:-}"
   local value=""
   while [[ -z "$value" ]]; do
     if [[ -t 0 ]]; then
@@ -25,7 +26,11 @@ prompt_value() {
     elif [[ -r /dev/tty ]]; then
       read -r -p "$prompt" value </dev/tty
     else
-      echo "Unable to prompt for input. Set DISCORD_TOKEN in the environment before running this script." >&2
+      if [[ -n "$required_env" ]]; then
+        echo "Unable to prompt for input. Set $required_env in the environment before running this script." >&2
+      else
+        echo "Unable to prompt for input. Re-run this script in an interactive shell." >&2
+      fi
       exit 1
     fi
   done
