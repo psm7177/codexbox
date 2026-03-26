@@ -1,6 +1,7 @@
 import type { Message } from "discord.js";
 import { isAdminUser, splitDiscordMessage } from "../discord-context.js";
 import { getDynamicToolProfile } from "../dynamic-tools.js";
+import { formatNetworkAccess, formatSandboxMode } from "./format.js";
 import type { WorkflowConversationKind, WorkflowRecord, WorkflowThreadPolicy } from "../workflow-store.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 
@@ -108,6 +109,8 @@ async function showWorkflow(context: CommandContext, message: Message, workflowI
     `conversation: \`${workflow.conversationKey}\``,
     `workspace: \`${workflow.workspaceKey}\``,
     `cwd: \`${workflow.cwd}\``,
+    `access: \`${formatSandboxMode(workflow.sandboxMode ?? context.config.sandboxMode)}\``,
+    `network: \`${formatNetworkAccess(workflow.networkAccess ?? context.config.sandboxNetworkAccess)}\``,
     `model: \`${workflow.model ?? "default"}\``,
     `provider: \`${workflow.modelProvider ?? "default"}\``,
     `thread: \`${workflow.threadId ?? "none"}\``,
@@ -500,6 +503,8 @@ export function createWorkCommand(context: CommandContext): CommandHandler {
       guildId: message.guildId,
       goal,
       cwd: context.workspaceService.getCwd(workspaceKey),
+      sandboxMode: context.workspaceService.getSandboxMode(workspaceKey),
+      networkAccess: context.workspaceService.getNetworkAccess(workspaceKey),
       model: context.workspaceService.getModel(workspaceKey),
       modelProvider,
       threadId: reuseConversationThread ? session?.threadId ?? null : null,

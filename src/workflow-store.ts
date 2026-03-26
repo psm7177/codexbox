@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { SandboxMode } from "./config.js";
 
 export type WorkflowStatus = "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
 export type WorkflowConversationKind = "dm" | "channel" | "thread";
@@ -14,6 +15,8 @@ export interface WorkflowRecord {
   guildId?: string | null;
   goal: string;
   cwd: string;
+  sandboxMode?: SandboxMode | null;
+  networkAccess?: boolean | null;
   model?: string | null;
   modelProvider?: string | null;
   threadId?: string | null;

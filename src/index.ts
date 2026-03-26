@@ -62,6 +62,8 @@ const workflowRunner = new BackgroundWorkflowRunner({
   activeTurnRegistry,
   intervalMs: config.workflowDefaults.pollIntervalMs,
   reuseConversationThread: config.workflowDefaults.reuseConversationThread,
+  defaultSandboxMode: config.sandboxMode,
+  defaultNetworkAccess: config.sandboxNetworkAccess,
 });
 const commandHandlers = createCommandHandlers({
   config,

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { SandboxMode } from "../config.js";
 import type {
   WorkflowConversationKind,
   WorkflowRecord,
@@ -13,6 +14,14 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 60_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_FAILURES = 5;
 const MAX_PENDING_PROMPTS = 8;
+const FORBIDDEN_PENDING_PROMPT_PATTERNS = [
+  /<\/?workflow_(?:plan|state|outputs)>/i,
+  /ignore\s+(?:all\s+)?(?:previous|above)\s+instructions/i,
+  /override\b.*\b(?:protocol|instructions|rules|preset)\b/i,
+  /\bsystem\s+prompt\b/i,
+  /\bmachine-readable\s+blocks?\b/i,
+  /do\s+not\s+follow\b.*\b(?:protocol|instructions|rules)\b/i,
+];
 
 export interface WorkflowEventRecord {
   at: string;
@@ -140,6 +149,18 @@ function clampPlanWarnings(warnings: string[] | null | undefined): string[] | nu
     .filter(Boolean)
     .slice(0, 12)
     .map((entry) => (entry.length > 300 ? `${entry.slice(0, 297).trimEnd()}...` : entry));
+}
+
+function sanitizePendingPrompt(prompt: string): string | null {
+  const sanitized = prompt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !FORBIDDEN_PENDING_PROMPT_PATTERNS.some((pattern) => pattern.test(line)))
+    .join("\n")
+    .trim();
+
+  return sanitized || null;
 }
 
 export class WorkflowService {
@@ -421,6 +442,8 @@ export class WorkflowService {
     guildId?: string | null;
     goal: string;
     cwd: string;
+    sandboxMode?: SandboxMode | null;
+    networkAccess?: boolean | null;
     model?: string | null;
     modelProvider?: string | null;
     threadId?: string | null;
@@ -437,6 +460,8 @@ export class WorkflowService {
       guildId: input.guildId ?? null,
       goal: input.goal.trim(),
       cwd: input.cwd,
+      sandboxMode: input.sandboxMode ?? null,
+      networkAccess: input.networkAccess ?? null,
       model: input.model ?? null,
       modelProvider: input.modelProvider ?? null,
       threadId: input.threadId ?? null,
@@ -565,10 +590,15 @@ export class WorkflowService {
       return null;
     }
 
+    const sanitizedPrompt = sanitizePendingPrompt(prompt);
+    if (!sanitizedPrompt) {
+      return null;
+    }
+
     const updated: WorkflowRecord = {
       ...workflow,
       updatedAt: nowIso(),
-      pendingPrompts: clampPendingPrompts([...(workflow.pendingPrompts ?? []), prompt]),
+      pendingPrompts: clampPendingPrompts([...(workflow.pendingPrompts ?? []), sanitizedPrompt]),
       nextRunAt:
         workflow.status === "waiting" || workflow.status === "queued" || workflow.status === "failed"
           ? new Date().toISOString()
@@ -827,6 +857,8 @@ export class WorkflowService {
       `- guild_id: \`${record.guildId ?? "dm"}\``,
       `- model: \`${record.model ?? "default"}\``,
       `- provider: \`${record.modelProvider ?? "default"}\``,
+      `- sandbox_mode: \`${record.sandboxMode ?? "default"}\``,
+      `- network_access: \`${record.networkAccess == null ? "default" : record.networkAccess ? "on" : "off"}\``,
       `- thread_id: \`${record.threadId ?? "none"}\``,
       `- thread_tool_profile: \`${record.threadToolProfile ?? "none"}\``,
       `- thread_policy: \`${normalizeThreadPolicy(record.threadPolicy)}\``,
