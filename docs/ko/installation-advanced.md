@@ -38,7 +38,7 @@ DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
 `download_open_access_pdf`로 OA PDF를 내려받으려면 봇 시작 전에 이메일 주소를 설정하세요.
 
 ```bash
-UNPAYWALL_EMAIL=you@example.com npm start
+CODEX_OSS_BASE_URL=http://localhost:11434/v1 UNPAYWALL_EMAIL=you@example.com npm start
 ```
 
 ## systemd scope 강제

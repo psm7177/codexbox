@@ -1,4 +1,5 @@
 import { splitDiscordMessage } from "../discord-context.js";
+import { hasConfiguredOssBaseUrlOverride, resolveBuiltInOssBaseUrl } from "../config.js";
 import type { CommandContext, CommandHandler } from "./types.js";
 
 interface ConfigReadResponse {
@@ -14,9 +15,9 @@ interface ConfigReadResponse {
 }
 
 const BUILT_IN_PROVIDERS = [
-  { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1" },
-  { id: "ollama", name: "gpt-oss (Ollama)", baseUrl: "http://localhost:11434/v1" },
-  { id: "lmstudio", name: "gpt-oss (LM Studio)", baseUrl: "http://localhost:1234/v1" },
+  { id: "openai", name: "OpenAI", defaultBaseUrl: "https://api.openai.com/v1", ossDefaultPort: null },
+  { id: "ollama", name: "gpt-oss (Ollama)", defaultBaseUrl: "http://localhost:11434/v1", ossDefaultPort: 11434 },
+  { id: "lmstudio", name: "gpt-oss (LM Studio)", defaultBaseUrl: "http://localhost:1234/v1", ossDefaultPort: 1234 },
 ];
 
 export function createProvidersCommand(context: CommandContext): CommandHandler {
@@ -30,13 +31,18 @@ export function createProvidersCommand(context: CommandContext): CommandHandler 
 
     const configuredProviders = response.config?.model_providers ?? {};
     const lines = ["Available providers:"];
+    const hasOssOverride = hasConfiguredOssBaseUrlOverride();
 
     for (const provider of BUILT_IN_PROVIDERS) {
       const override = configuredProviders[provider.id];
       const displayName = override?.name?.trim() || provider.name;
-      const baseUrl = override?.base_url?.trim() || provider.baseUrl;
+      const baseUrl =
+        provider.ossDefaultPort != null && hasOssOverride
+          ? resolveBuiltInOssBaseUrl(provider.ossDefaultPort)
+          : override?.base_url?.trim() || provider.defaultBaseUrl;
       const selectedSuffix = selectedProvider === provider.id ? " [selected]" : "";
-      const overrideSuffix = override ? " [config override]" : " [built-in]";
+      const overrideSuffix =
+        provider.ossDefaultPort != null && hasOssOverride ? " [env override]" : override ? " [config override]" : " [built-in]";
       lines.push(`- ${provider.id}${selectedSuffix}${overrideSuffix}`);
       lines.push(`  name: ${displayName}`);
       lines.push(`  base_url: ${baseUrl}`);

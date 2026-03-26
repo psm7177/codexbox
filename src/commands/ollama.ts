@@ -1,3 +1,4 @@
+import { resolveBuiltInOssBaseUrl } from "../config.js";
 import type { CommandContext } from "./types.js";
 
 interface ConfigReadResponse {
@@ -36,8 +37,11 @@ export async function fetchOllamaModels(context: CommandContext, workspaceKey: s
     includeLayers: false,
   })) as ConfigReadResponse;
 
+  const envConfiguredBaseUrl = resolveBuiltInOssBaseUrl(11434);
   const configuredBaseUrl = response.config?.model_providers?.ollama?.base_url?.trim();
-  const hostRoot = baseUrlToHostRoot(configuredBaseUrl || "http://localhost:11434/v1");
+  const hostRoot = baseUrlToHostRoot(
+    process.env.CODEX_OSS_BASE_URL?.trim() || process.env.CODEX_OSS_PORT?.trim() ? envConfiguredBaseUrl : configuredBaseUrl || envConfiguredBaseUrl,
+  );
   const ollamaResponse = await fetch(`${hostRoot}/api/tags`);
   if (!ollamaResponse.ok) {
     throw new Error(`Ollama returned HTTP ${ollamaResponse.status} for /api/tags`);

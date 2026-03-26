@@ -1406,6 +1406,75 @@ test("message router lists providers through the providers command", async () =>
   assert.doesNotMatch(replies[0] ?? "", /7697a44cee054c0eb8f7094ac46da884/);
 });
 
+test("message router shows env override for built-in oss providers", async () => {
+  const originalBaseUrl = process.env.CODEX_OSS_BASE_URL;
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+
+  process.env.CODEX_OSS_BASE_URL = "http://remote-ollama.example:11434/v1";
+
+  try {
+    const handler = createMessageCreateHandler({
+      config,
+      conversationService,
+      restartCoordinator,
+      workspaceService,
+      codexClient: {
+        async ensureThread() {
+          throw new Error("ensureThread should not be called for provider listing");
+        },
+        async startTurn() {
+          throw new Error("startTurn should not be called for provider listing");
+        },
+      },
+      commandHandlers,
+      errorTracker,
+      getBotUserId: () => "bot-1",
+      log: () => {},
+      errorLog: () => {},
+    });
+
+    await handler(
+      createMessage({
+        content: "<@bot-1> !codex providers",
+        reply: async (content: string) => {
+          replies.push(content);
+          return undefined;
+        },
+      }),
+    );
+  } finally {
+    if (originalBaseUrl == null) {
+      delete process.env.CODEX_OSS_BASE_URL;
+    } else {
+      process.env.CODEX_OSS_BASE_URL = originalBaseUrl;
+    }
+  }
+
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /ollama \[env override\]/);
+  assert.match(replies[0] ?? "", /lmstudio \[env override\]/);
+  assert.match(replies[0] ?? "", /http:\/\/remote-ollama\.example:11434\/v1/);
+});
+
 test("message router loads Ollama model tags for !codex model when provider is ollama", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
   const config = createConfig(workspace);
@@ -1476,6 +1545,86 @@ test("message router loads Ollama model tags for !codex model when provider is o
   assert.match(replies[0] ?? "", /ollama models:/);
   assert.match(replies[0] ?? "", /gpt-oss:20b/);
   assert.match(replies[0] ?? "", /gpt-oss:120b-cloud/);
+});
+
+test("message router loads Ollama model tags through CODEX_OSS_BASE_URL override", async () => {
+  const originalBaseUrl = process.env.CODEX_OSS_BASE_URL;
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "codex-router-"));
+  const config = createConfig(workspace);
+  const sessionStore = new SessionStore(config.sessionStorePath);
+  await sessionStore.setWorkspaceModelProvider("channel:guild-1:channel-1", "ollama");
+  const conversationService = new ConversationService(sessionStore);
+  const workspaceService = new WorkspaceService(sessionStore, config);
+  const restartCoordinator = new RestartCoordinator({ exitProcess: () => {} });
+  const errorTracker = new ErrorTracker();
+  const replies: string[] = [];
+  const commandHandlers = createCommandHandlers({
+    config,
+    conversationService,
+    restartCoordinator,
+    workspaceService,
+    codexClient: {
+      request: createCodexRequestStub(),
+    },
+    errorTracker,
+    getConversationKey,
+    getWorkspaceKey,
+  });
+  const requestedUrls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input) => {
+    requestedUrls.push(typeof input === "string" ? input : input.toString());
+    return {
+      ok: true,
+      json: async () => ({
+        models: [{ name: "gpt-oss:20b" }],
+      }),
+    } as Response;
+  }) as typeof fetch;
+  process.env.CODEX_OSS_BASE_URL = "http://remote-ollama.example:11434/v1";
+
+  try {
+    const handler = createMessageCreateHandler({
+      config,
+      conversationService,
+      restartCoordinator,
+      workspaceService,
+      codexClient: {
+        async ensureThread() {
+          throw new Error("ensureThread should not be called for model status");
+        },
+        async startTurn() {
+          throw new Error("startTurn should not be called for model status");
+        },
+      },
+      commandHandlers,
+      errorTracker,
+      getBotUserId: () => "bot-1",
+      log: () => {},
+      errorLog: () => {},
+    });
+
+    await handler(
+      createMessage({
+        content: "<@bot-1> !codex model",
+        reply: async (content: string) => {
+          replies.push(content);
+          return undefined;
+        },
+      }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBaseUrl == null) {
+      delete process.env.CODEX_OSS_BASE_URL;
+    } else {
+      process.env.CODEX_OSS_BASE_URL = originalBaseUrl;
+    }
+  }
+
+  assert.deepEqual(requestedUrls, ["http://remote-ollama.example:11434/api/tags"]);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0] ?? "", /gpt-oss:20b/);
 });
 
 test("message router keeps the bound session when only the model changes", async () => {

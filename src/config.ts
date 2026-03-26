@@ -144,6 +144,25 @@ function parseInteger(value: string | undefined, fallback: number, options?: { m
   return Math.max(min, Math.min(max, parsed));
 }
 
+function parseOptionalInteger(value: string | undefined): number | null {
+  if (value == null || value.trim() === "") {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value.trim(), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function hasConfiguredOssBaseUrlOverride(): boolean {
+  return Boolean(process.env.CODEX_OSS_BASE_URL?.trim()) || parseOptionalInteger(process.env.CODEX_OSS_PORT) != null;
+}
+
+export function resolveBuiltInOssBaseUrl(defaultPort: number): string {
+  const port = parseOptionalInteger(process.env.CODEX_OSS_PORT) ?? defaultPort;
+  const envBaseUrl = process.env.CODEX_OSS_BASE_URL?.trim();
+  return envBaseUrl && envBaseUrl !== "" ? envBaseUrl : `http://localhost:${port}/v1`;
+}
+
 export function buildSandboxPolicy(mode: SandboxMode, networkAccess: boolean, workspace: string): SandboxPolicy {
   if (mode === "dangerFullAccess") {
     return { type: "dangerFullAccess" };

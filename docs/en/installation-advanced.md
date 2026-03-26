@@ -38,7 +38,7 @@ DISCORD_TOKEN=your_token_here bash scripts/setup-linux.sh
 Set an email address before starting the bot if you want `download_open_access_pdf` to fetch OA PDFs from Unpaywall.
 
 ```bash
-UNPAYWALL_EMAIL=you@example.com npm start
+CODEX_OSS_BASE_URL=http://localhost:11434/v1 UNPAYWALL_EMAIL=you@example.com npm start
 ```
 
 ## Force systemd Scope

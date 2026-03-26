@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAppServerEnv, loadConfig } from "../src/config.js";
+import { buildAppServerEnv, hasConfiguredOssBaseUrlOverride, loadConfig, resolveBuiltInOssBaseUrl } from "../src/config.js";
 
 test("buildAppServerEnv excludes Discord secrets and keeps required runtime vars", () => {
   const env = buildAppServerEnv({
@@ -55,6 +55,37 @@ test("loadConfig parses workflow defaults from env", () => {
       } else {
         process.env[key] = value;
       }
+    }
+  }
+});
+
+test("resolveBuiltInOssBaseUrl follows CODEX_OSS_BASE_URL and CODEX_OSS_PORT", () => {
+  const originalBaseUrl = process.env.CODEX_OSS_BASE_URL;
+  const originalPort = process.env.CODEX_OSS_PORT;
+
+  try {
+    delete process.env.CODEX_OSS_BASE_URL;
+    delete process.env.CODEX_OSS_PORT;
+    assert.equal(hasConfiguredOssBaseUrlOverride(), false);
+    assert.equal(resolveBuiltInOssBaseUrl(11434), "http://localhost:11434/v1");
+
+    process.env.CODEX_OSS_PORT = "22456";
+    assert.equal(hasConfiguredOssBaseUrlOverride(), true);
+    assert.equal(resolveBuiltInOssBaseUrl(11434), "http://localhost:22456/v1");
+
+    process.env.CODEX_OSS_BASE_URL = "http://remote-oss.example:8080/v1";
+    assert.equal(resolveBuiltInOssBaseUrl(11434), "http://remote-oss.example:8080/v1");
+  } finally {
+    if (originalBaseUrl == null) {
+      delete process.env.CODEX_OSS_BASE_URL;
+    } else {
+      process.env.CODEX_OSS_BASE_URL = originalBaseUrl;
+    }
+
+    if (originalPort == null) {
+      delete process.env.CODEX_OSS_PORT;
+    } else {
+      process.env.CODEX_OSS_PORT = originalPort;
     }
   }
 });
